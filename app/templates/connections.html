@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Connections — AI Assistant</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <div class="container profile">
+        <header>
+            <div class="user-info">
+                {% if user.picture %}
+                <img src="{{ user.picture }}" alt="Avatar" class="avatar">
+                {% endif %}
+                <span>{{ user.name or user.email }}</span>
+            </div>
+            <div class="nav-links">
+                <a href="/chat" class="btn btn-small">Chat</a>
+                <a href="/profile" class="btn btn-small">Profile</a>
+                <a href="/logout" class="btn btn-small">Logout</a>
+            </div>
+        </header>
+
+        <h2>Connected Accounts</h2>
+        <p class="muted">
+            Link a third-party identity (e.g., Google) to your Auth0 user. The chat's tools can then call APIs on
+            your behalf via Token Vault, regardless of which IdP you used to log in.
+        </p>
+
+        {% if error %}
+        <section class="token-section">
+            <p style="color: #b00;"><strong>Error:</strong> {{ error }}</p>
+        </section>
+        {% endif %}
+
+        {% if success %}
+        <section class="token-section">
+            <p style="color: #060;"><strong>Success:</strong> {{ success }}</p>
+        </section>
+        {% endif %}
+
+        <section class="token-section">
+            <h3>Currently Connected</h3>
+            {% if accounts %}
+            <table class="claims-table">
+                <tr>
+                    <th class="claim-key">Connection</th>
+                    <th class="claim-key">Created</th>
+                    <th class="claim-key">Scopes</th>
+                    <th class="claim-key"></th>
+                </tr>
+                {% for acc in accounts %}
+                <tr>
+                    <td class="claim-value"><strong>{{ acc.connection }}</strong><br><small>{{ acc.id }}</small></td>
+                    <td class="claim-value">{{ acc.created_at }}</td>
+                    <td class="claim-value"><pre style="white-space: pre-wrap; margin: 0;">{{ acc.scopes | join('\n') }}</pre></td>
+                    <td class="claim-value">
+                        <form method="post" action="/connections/disconnect/{{ acc.id }}" style="margin: 0;">
+                            <button type="submit" class="btn btn-small">Disconnect</button>
+                        </form>
+                    </td>
+                </tr>
+                {% endfor %}
+            </table>
+            {% else %}
+            <p class="muted">No accounts connected yet.</p>
+            {% endif %}
+        </section>
+
+        <section class="token-section">
+            <h3>Connect a New Account</h3>
+            <form method="post" action="/connections/connect/google-oauth2" style="display: inline-block;">
+                <button type="submit" class="btn">Connect Google Account</button>
+            </form>
+        </section>
+    </div>
+</body>
+</html>

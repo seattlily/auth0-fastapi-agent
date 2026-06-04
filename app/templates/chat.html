@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Chat — AI Assistant</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <div class="container chat">
+        <header>
+            <div class="user-info">
+                {% if user.picture %}
+                <img src="{{ user.picture }}" alt="Avatar" class="avatar">
+                {% endif %}
+                <span>{{ user.name or user.email }}</span>
+            </div>
+            <div class="nav-links">
+                <a href="/profile" class="btn btn-small">Profile</a>
+                <a href="/connections" class="btn btn-small">Connections</a>
+                <a href="/logout" class="btn btn-small">Logout</a>
+            </div>
+        </header>
+
+        <div class="messages" id="messages">
+            {% for msg in messages %}
+            <div class="message {{ msg.role }}">
+                <strong>{{ "You" if msg.role == "user" else "Assistant" }}:</strong>
+                <p>{{ msg.content }}</p>
+            </div>
+            {% endfor %}
+        </div>
+
+        <form id="chat-form" method="post" action="/chat" class="chat-form">
+            <input id="chat-input" type="text" name="message" placeholder="Type your message..." autocomplete="off" required>
+            <button type="submit" class="btn">Send</button>
+        </form>
+    </div>
+
+    <script>
+    (() => {
+        const form = document.getElementById('chat-form');
+        const input = document.getElementById('chat-input');
+        const messages = document.getElementById('messages');
+
+        function addMessage(role, content) {
+            const div = document.createElement('div');
+            div.className = 'message ' + role;
+            const strong = document.createElement('strong');
+            strong.textContent = (role === 'user' ? 'You' : 'Assistant') + ':';
+            const p = document.createElement('p');
+            p.textContent = content;
+            div.appendChild(strong);
+            div.appendChild(p);
+            messages.appendChild(div);
+            messages.scrollTop = messages.scrollHeight;
+            return p;
+        }
+
+        form.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const text = input.value.trim();
+            if (!text) return;
+
+            input.value = '';
+            input.disabled = true;
+            addMessage('user', text);
+            const assistantPara = addMessage('assistant', '');
+
+            let full = '';
+            try {
+                const resp = await fetch('/chat/stream', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ message: text }),
+                });
+                if (!resp.ok || !resp.body) {
+                    full = 'Error: ' + resp.status + ' ' + resp.statusText;
+                    assistantPara.textContent = full;
+                } else {
+                    const reader = resp.body.getReader();
+                    const decoder = new TextDecoder();
+                    while (true) {
+                        const { value, done } = await reader.read();
+                        if (done) break;
+                        full += decoder.decode(value, { stream: true });
+                        assistantPara.textContent = full;
+                        messages.scrollTop = messages.scrollHeight;
+                    }
+                }
+            } catch (err) {
+                full = 'Error: ' + err.message;
+                assistantPara.textContent = full;
+            }
+
+            if (full) {
+                try {
+                    await fetch('/chat/save', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ user: text, assistant: full }),
+                    });
+                } catch (err) {
+                    console.error('save failed', err);
+                }
+            }
+
+            input.disabled = false;
+            input.focus();
+        });
+    })();
+    </script>
+</body>
+</html>

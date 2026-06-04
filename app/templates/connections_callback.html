@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Finishing connection…</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <div class="container profile">
+        <p id="status" class="muted">Finishing connection…</p>
+    </div>
+    <script>
+    (async () => {
+        const status = document.getElementById('status');
+        const hash = window.location.hash.startsWith('#') ? window.location.hash.slice(1) : window.location.hash;
+        const params = new URLSearchParams(hash);
+        const connect_code = params.get('connect_code');
+        const state = params.get('state');
+        const fragErr = params.get('error') || params.get('error_description');
+
+        if (fragErr) {
+            window.location.replace('/connections?error=' + encodeURIComponent(fragErr));
+            return;
+        }
+        if (!connect_code) {
+            window.location.replace('/connections?error=' + encodeURIComponent('No connect_code in URL fragment'));
+            return;
+        }
+
+        try {
+            const resp = await fetch('/connections/complete', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ connect_code, state }),
+            });
+            if (resp.ok) {
+                window.location.replace('/connections?success=connected');
+            } else {
+                let detail = resp.status + ' ' + resp.statusText;
+                try { const j = await resp.json(); detail = j.error || detail; } catch (_) {}
+                window.location.replace('/connections?error=' + encodeURIComponent(detail));
+            }
+        } catch (err) {
+            window.location.replace('/connections?error=' + encodeURIComponent(err.message));
+        }
+    })();
+    </script>
+</body>
+</html>

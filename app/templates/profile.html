@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Profile — AI Assistant</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <div class="container profile">
+        <header>
+            <div class="user-info">
+                {% if user.picture %}
+                <img src="{{ user.picture }}" alt="Avatar" class="avatar">
+                {% endif %}
+                <span>{{ user.name or user.email }}</span>
+            </div>
+            <div class="nav-links">
+                <a href="/chat" class="btn btn-small">Chat</a>
+                <a href="/connections" class="btn btn-small">Connections</a>
+                <a href="/logout" class="btn btn-small">Logout</a>
+            </div>
+        </header>
+
+        <h2>User Profile</h2>
+
+        <section class="token-section">
+            <h3>ID Token Claims</h3>
+            <table class="claims-table">
+                {% for key, value in id_token_claims.items() %}
+                <tr>
+                    <td class="claim-key">{{ key }}</td>
+                    <td class="claim-value">{{ value }}</td>
+                </tr>
+                {% endfor %}
+            </table>
+        </section>
+
+        <section class="token-section">
+            <h3>ID Token (Raw Claims)</h3>
+            <pre class="token-raw">{{ id_token_claims_pretty }}</pre>
+        </section>
+
+        <section class="token-section">
+            <h3>Access Token Claims</h3>
+            {% if access_token_claims %}
+            <table class="claims-table">
+                {% for key, value in access_token_claims.items() %}
+                <tr>
+                    <td class="claim-key">{{ key }}</td>
+                    <td class="claim-value">{{ value }}</td>
+                </tr>
+                {% endfor %}
+            </table>
+            {% else %}
+            <p class="muted">Could not decode access token claims (token may be opaque).</p>
+            {% endif %}
+        </section>
+
+        <section class="token-section">
+            <h3>Access Token (Raw)</h3>
+            {% if access_token %}
+            <pre class="token-raw">{{ access_token }}</pre>
+            {% else %}
+            <p class="muted">No access token available.</p>
+            {% endif %}
+        </section>
+
+        <section class="token-section">
+            <h3>Access Token Claims (JSON)</h3>
+            {% if access_token_claims %}
+            <pre class="token-raw">{{ access_token_claims_pretty }}</pre>
+            {% else %}
+            <p class="muted">N/A</p>
+            {% endif %}
+        </section>
+    </div>
+</body>
+</html>
