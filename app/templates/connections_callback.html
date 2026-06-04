@@ -12,11 +12,17 @@
     <script>
     (async () => {
         const status = document.getElementById('status');
+        // Auth0 sometimes returns connect_code in the URL fragment (#…) and
+        // sometimes in the query string (?…) depending on tenant config.
+        // Check both.
         const hash = window.location.hash.startsWith('#') ? window.location.hash.slice(1) : window.location.hash;
-        const params = new URLSearchParams(hash);
-        const connect_code = params.get('connect_code');
-        const state = params.get('state');
-        const fragErr = params.get('error') || params.get('error_description');
+        const search = window.location.search.startsWith('?') ? window.location.search.slice(1) : window.location.search;
+        const fragParams = new URLSearchParams(hash);
+        const queryParams = new URLSearchParams(search);
+        const get = (k) => fragParams.get(k) || queryParams.get(k);
+        const connect_code = get('connect_code');
+        const state = get('state');
+        const fragErr = get('error') || get('error_description');
 
         if (fragErr) {
             window.location.replace('/connections?error=' + encodeURIComponent(fragErr));
