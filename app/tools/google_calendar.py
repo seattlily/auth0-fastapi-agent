@@ -83,6 +83,48 @@ async def list_upcoming_calendar_events(
     )
 
 
+async def create_calendar_event(
+    refresh_token: str,
+    summary: str,
+    start: str,
+    end: str,
+    description: str = "",
+    location: str = "",
+    attendees: list[str] | None = None,
+) -> str:
+    google_access_token = await get_federated_access_token(refresh_token, "google-oauth2")
+    service = build("calendar", "v3", credentials=Credentials(google_access_token))
+
+    event: dict = {
+        "summary": summary,
+        "start": {"dateTime": start},
+        "end": {"dateTime": end},
+    }
+    if description:
+        event["description"] = description
+    if location:
+        event["location"] = location
+    if attendees:
+        event["attendees"] = [{"email": e} for e in attendees]
+
+    created = (
+        service.events()
+        .insert(calendarId="primary", body=event, sendUpdates="none")
+        .execute()
+    )
+
+    return json.dumps(
+        {
+            "id": created.get("id"),
+            "htmlLink": created.get("htmlLink"),
+            "summary": created.get("summary"),
+            "start": created.get("start"),
+            "end": created.get("end"),
+            "location": created.get("location"),
+        }
+    )
+
+
 CALENDAR_TOOL_SCHEMA = {
     "type": "function",
     "function": {
@@ -104,6 +146,57 @@ CALENDAR_TOOL_SCHEMA = {
                     "description": "Maximum number of events to return. Default 5.",
                 },
             },
+        },
+    },
+}
+
+
+CREATE_CALENDAR_EVENT_TOOL_SCHEMA = {
+    "type": "function",
+    "function": {
+        "name": "create_calendar_event",
+        "description": (
+            "Create a new event on the user's primary Google Calendar. "
+            "Use whenever the user asks to schedule, add, book, or put "
+            "something on their calendar. Always confirm the start/end "
+            "with the user if not given explicitly."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "summary": {
+                    "type": "string",
+                    "description": "Event title (e.g., 'Lunch with Alex').",
+                },
+                "start": {
+                    "type": "string",
+                    "description": (
+                        "Event start time in RFC3339 format with timezone "
+                        "offset, e.g. '2026-06-05T15:00:00-07:00'."
+                    ),
+                },
+                "end": {
+                    "type": "string",
+                    "description": (
+                        "Event end time in RFC3339 format with timezone "
+                        "offset, e.g. '2026-06-05T16:00:00-07:00'."
+                    ),
+                },
+                "description": {
+                    "type": "string",
+                    "description": "Optional notes / agenda for the event.",
+                },
+                "location": {
+                    "type": "string",
+                    "description": "Optional location string.",
+                },
+                "attendees": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Optional list of attendee email addresses.",
+                },
+            },
+            "required": ["summary", "start", "end"],
         },
     },
 }

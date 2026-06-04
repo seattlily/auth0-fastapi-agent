@@ -23,8 +23,14 @@ from tools.auth0_my_account import (
 )
 from tools.google_calendar import (
     CALENDAR_TOOL_SCHEMA,
+    CREATE_CALENDAR_EVENT_TOOL_SCHEMA,
     TokenVaultError,
+    create_calendar_event,
     list_upcoming_calendar_events,
+)
+from tools.google_gmail import (
+    GMAIL_LIST_TOOL_SCHEMA,
+    list_recent_emails,
 )
 
 MAX_TOOL_ITERATIONS = 3
@@ -85,6 +91,12 @@ async def login(request: Request):
     return await oauth.auth0.authorize_redirect(request, str(redirect_uri))
 
 
+GOOGLE_CONNECTION_SCOPES = [
+    "https://www.googleapis.com/auth/calendar.events",
+    "https://www.googleapis.com/auth/gmail.readonly",
+]
+
+
 @app.get("/connect/google-calendar")
 async def connect_google_calendar(request: Request):
     redirect_uri = request.url_for("callback")
@@ -92,7 +104,7 @@ async def connect_google_calendar(request: Request):
         request,
         str(redirect_uri),
         connection="google-oauth2",
-        connection_scope="https://www.googleapis.com/auth/calendar.readonly",
+        connection_scope=" ".join(GOOGLE_CONNECTION_SCOPES),
     )
 
 
@@ -234,7 +246,30 @@ async def dispatch_tool(name: str, args: dict, refresh_token: str) -> str:
             days=int(args.get("days", 7)),
             max_results=int(args.get("max_results", 5)),
         )
+    if name == "create_calendar_event":
+        return await create_calendar_event(
+            refresh_token=refresh_token,
+            summary=args["summary"],
+            start=args["start"],
+            end=args["end"],
+            description=args.get("description", ""),
+            location=args.get("location", ""),
+            attendees=args.get("attendees") or None,
+        )
+    if name == "list_recent_emails":
+        return await list_recent_emails(
+            refresh_token=refresh_token,
+            max_results=int(args.get("max_results", 5)),
+            query=args.get("query", ""),
+        )
     return json.dumps({"error": f"Unknown tool: {name}"})
+
+
+GOOGLE_TOOL_SCHEMAS = [
+    CALENDAR_TOOL_SCHEMA,
+    CREATE_CALENDAR_EVENT_TOOL_SCHEMA,
+    GMAIL_LIST_TOOL_SCHEMA,
+]
 
 
 @app.post("/chat/stream")
@@ -261,7 +296,7 @@ async def chat_stream(request: Request):
                 stream = await openai_client.chat.completions.create(
                     model=LLM_MODEL,
                     messages=messages,
-                    tools=[CALENDAR_TOOL_SCHEMA],
+                    tools=GOOGLE_TOOL_SCHEMAS,
                     stream=True,
                 )
 
@@ -384,7 +419,7 @@ async def connections_connect(request: Request, connection: str):
     state = secrets.token_urlsafe(24)
 
     scopes_for_connection = {
-        "google-oauth2": ["openid", "https://www.googleapis.com/auth/calendar.readonly"],
+        "google-oauth2": ["openid", *GOOGLE_CONNECTION_SCOPES],
     }
     scopes = scopes_for_connection.get(connection)
 
