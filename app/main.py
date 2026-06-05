@@ -61,11 +61,6 @@ oauth.register(
             "read:me:connected_accounts "
             "delete:me:connected_accounts"
         ),
-        **(
-            {"audience": os.environ["AUTH0_AUDIENCE"]}
-            if os.environ.get("AUTH0_AUDIENCE")
-            else {}
-        ),
     },
     server_metadata_url=f'https://{os.environ["AUTH0_DOMAIN"]}/.well-known/openid-configuration',
 )
@@ -85,10 +80,17 @@ async def home(request: Request):
     return templates.TemplateResponse(request=request, name="home.html")
 
 
+def _audience_kwargs() -> dict:
+    audience = os.environ.get("AUTH0_AUDIENCE")
+    return {"audience": audience} if audience else {}
+
+
 @app.get("/login")
 async def login(request: Request):
     redirect_uri = request.url_for("callback")
-    return await oauth.auth0.authorize_redirect(request, str(redirect_uri))
+    return await oauth.auth0.authorize_redirect(
+        request, str(redirect_uri), **_audience_kwargs()
+    )
 
 
 GOOGLE_CONNECTION_SCOPES = [
@@ -105,6 +107,7 @@ async def connect_google_calendar(request: Request):
         str(redirect_uri),
         connection="google-oauth2",
         connection_scope=" ".join(GOOGLE_CONNECTION_SCOPES),
+        **_audience_kwargs(),
     )
 
 
