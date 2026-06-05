@@ -5,6 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Chat — AI Assistant</title>
     <link rel="stylesheet" href="/static/style.css">
+    <script src="https://cdn.jsdelivr.net/npm/marked@13/marked.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/dompurify@3/dist/purify.min.js"></script>
 </head>
 <body>
     <div class="container chat">
@@ -26,7 +28,7 @@
             {% for msg in messages %}
             <div class="message {{ msg.role }}">
                 <strong>{{ "You" if msg.role == "user" else "Assistant" }}:</strong>
-                <p>{{ msg.content }}</p>
+                <div class="content">{{ msg.content }}</div>
             </div>
             {% endfor %}
         </div>
@@ -38,23 +40,47 @@
     </div>
 
     <script>
+    // Make every rendered link open in a new tab.
+    DOMPurify.addHook('afterSanitizeAttributes', (node) => {
+        if ('target' in node) {
+            node.setAttribute('target', '_blank');
+            node.setAttribute('rel', 'noopener noreferrer');
+        }
+    });
+
+    function renderMarkdown(text) {
+        const html = marked.parse(text || '', { breaks: true, gfm: true });
+        return DOMPurify.sanitize(html);
+    }
+
+    // On page load, re-render server-rendered assistant messages as markdown.
+    // (User messages stay as plain text — they were typed, not authored by the model.)
+    document.querySelectorAll('.message.assistant .content').forEach((el) => {
+        el.innerHTML = renderMarkdown(el.textContent);
+    });
+
     (() => {
         const form = document.getElementById('chat-form');
         const input = document.getElementById('chat-input');
         const messages = document.getElementById('messages');
 
-        function addMessage(role, content) {
+        function addMessage(role, content, asMarkdown) {
             const div = document.createElement('div');
             div.className = 'message ' + role;
             const strong = document.createElement('strong');
             strong.textContent = (role === 'user' ? 'You' : 'Assistant') + ':';
-            const p = document.createElement('p');
-            p.textContent = content;
+            const contentEl = document.createElement('div');
+            contentEl.className = 'content';
+            if (asMarkdown) {
+                contentEl.innerHTML = renderMarkdown(content);
+            } else {
+                contentEl.textContent = content;
+            }
             div.appendChild(strong);
-            div.appendChild(p);
+            div.appendChild(contentEl);
             messages.appendChild(div);
             messages.scrollTop = messages.scrollHeight;
-            return p;
+            return contentEl;
         }
 
         form.addEventListener('submit', async (e) => {
@@ -64,8 +90,8 @@
 
             input.value = '';
             input.disabled = true;
-            addMessage('user', text);
-            const assistantPara = addMessage('assistant', '');
+            addMessage('user', text, false);
+            const assistantContent = addMessage('assistant', '', true);
 
             let full = '';
             try {
@@ -76,7 +102,7 @@
                 });
                 if (!resp.ok || !resp.body) {
                     full = 'Error: ' + resp.status + ' ' + resp.statusText;
-                    assistantPara.textContent = full;
+                    assistantContent.textContent = full;
                 } else {
                     const reader = resp.body.getReader();
                     const decoder = new TextDecoder();
@@ -84,13 +110,13 @@
                         const { value, done } = await reader.read();
                         if (done) break;
                         full += decoder.decode(value, { stream: true });
-                        assistantPara.textContent = full;
+                        assistantContent.innerHTML = renderMarkdown(full);
                         messages.scrollTop = messages.scrollHeight;
                     }
                 }
             } catch (err) {
                 full = 'Error: ' + err.message;
-                assistantPara.textContent = full;
+                assistantContent.textContent = full;
             }
 
             if (full) {
