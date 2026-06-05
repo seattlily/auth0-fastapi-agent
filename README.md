@@ -43,7 +43,7 @@ Fill in:
 
 ### 3. Auth0 dashboard configuration
 
-This is the part that tends to trip workshop attendees up. The following must be configured in [your Auth0 dashboard](https://manage.auth0.com) **before** runtime calls will succeed:
+This is the part that tends to trip workshop attendees up. **For the full step-by-step walkthrough — including Google Cloud Console + GitHub OAuth setup and a flow-of-tokens explainer — see [`AUTH0_SETUP.md`](./AUTH0_SETUP.md).** The summary below is a skim:
 
 #### Application settings (Applications → your Regular Web App → Settings)
 
