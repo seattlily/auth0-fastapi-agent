@@ -136,13 +136,43 @@ async def logout(request: Request):
 
 
 def decode_jwt_claims(token: str) -> dict:
+    """Decode the payload of a *signed* JWT (JWS, 3 segments).
+    Returns {} for opaque tokens or JWE-encrypted tokens whose payload
+    cannot be decoded without the issuer's encryption key."""
     try:
-        payload = token.split(".")[1]
-        padding = 4 - len(payload) % 4
-        payload += "=" * padding
+        parts = token.split(".")
+        if len(parts) != 3:
+            return {}
+        payload = parts[1]
+        payload += "=" * (-len(payload) % 4)
         return json.loads(base64.urlsafe_b64decode(payload))
     except Exception:
         return {}
+
+
+def decode_jwt_header(token: str) -> dict:
+    """Decode the header of any JWT (JWS or JWE) — the header is always
+    plaintext base64-url-encoded JSON. Returns {} for non-JWT tokens."""
+    try:
+        if not token or "." not in token:
+            return {}
+        header = token.split(".")[0]
+        header += "=" * (-len(header) % 4)
+        return json.loads(base64.urlsafe_b64decode(header))
+    except Exception:
+        return {}
+
+
+def classify_token(token: str) -> str:
+    """jws (3 segments), jwe (5 segments), opaque (non-empty other), empty."""
+    if not token:
+        return "empty"
+    dots = token.count(".")
+    if dots == 2:
+        return "jws"
+    if dots == 4:
+        return "jwe"
+    return "opaque"
 
 
 def build_system_prompt(request: Request) -> str:
@@ -183,7 +213,11 @@ async def profile(request: Request):
         return RedirectResponse(url="/login")
     id_token_claims = request.session.get("id_token_claims", {})
     access_token = request.session.get("access_token", "")
-    access_token_claims = decode_jwt_claims(access_token) if access_token else {}
+    access_token_kind = classify_token(access_token)
+    access_token_header = decode_jwt_header(access_token) if access_token else {}
+    access_token_claims = (
+        decode_jwt_claims(access_token) if access_token_kind == "jws" else {}
+    )
     return templates.TemplateResponse(
         request=request,
         name="profile.html",
@@ -192,6 +226,9 @@ async def profile(request: Request):
             "id_token_claims": id_token_claims,
             "id_token_claims_pretty": json.dumps(id_token_claims, indent=2),
             "access_token": access_token,
+            "access_token_kind": access_token_kind,
+            "access_token_header": access_token_header,
+            "access_token_header_pretty": json.dumps(access_token_header, indent=2),
             "access_token_claims": access_token_claims,
             "access_token_claims_pretty": json.dumps(access_token_claims, indent=2),
         },

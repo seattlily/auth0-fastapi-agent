@@ -43,7 +43,7 @@
 
         <section class="token-section">
             <h3>Access Token Claims</h3>
-            {% if access_token_claims %}
+            {% if access_token_kind == "jws" and access_token_claims %}
             <table class="claims-table">
                 {% for key, value in access_token_claims.items() %}
                 <tr>
@@ -52,10 +52,36 @@
                 </tr>
                 {% endfor %}
             </table>
+            {% elif access_token_kind == "jwe" %}
+            <p class="muted">
+                This access token is <strong>JWE-encrypted</strong>
+                ({{ access_token_header.alg or "?" }} / {{ access_token_header.enc or "?" }}).
+                The payload can only be decrypted with Auth0's tenant key,
+                which intentionally isn't shared with the application — so
+                inner claims aren't viewable client-side. The token is still
+                valid; the chat, calendar, gmail and connected-accounts
+                features all use it correctly. For decoded user claims, see
+                the <strong>ID Token Claims</strong> section above.
+            </p>
+            {% elif access_token_kind == "opaque" %}
+            <p class="muted">
+                Access token is <strong>opaque</strong> (no audience requested
+                at login, or audience is an Auth0 internal API). To get a
+                signed JWT with viewable claims, set <code>AUTH0_AUDIENCE</code>
+                in <code>.env</code> to the Identifier of a custom Auth0 API
+                you've created, then log out and log back in.
+            </p>
             {% else %}
-            <p class="muted">Could not decode access token claims (token may be opaque).</p>
+            <p class="muted">No access token available.</p>
             {% endif %}
         </section>
+
+        {% if access_token_kind in ("jws", "jwe") %}
+        <section class="token-section">
+            <h3>Access Token Header</h3>
+            <pre class="token-raw">{{ access_token_header_pretty }}</pre>
+        </section>
+        {% endif %}
 
         <section class="token-section">
             <h3>Access Token (Raw)</h3>
@@ -66,14 +92,12 @@
             {% endif %}
         </section>
 
+        {% if access_token_kind == "jws" and access_token_claims %}
         <section class="token-section">
             <h3>Access Token Claims (JSON)</h3>
-            {% if access_token_claims %}
             <pre class="token-raw">{{ access_token_claims_pretty }}</pre>
-            {% else %}
-            <p class="muted">N/A</p>
-            {% endif %}
         </section>
+        {% endif %}
     </div>
 </body>
 </html>
