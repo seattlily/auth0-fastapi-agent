@@ -16,7 +16,9 @@ A single-process FastAPI web app that:
 4. Lets the LLM call **Google Calendar** on the user's behalf via **Auth0 Token Vault**, using OpenAI function calling.
 5. Exposes a **Connected Accounts** page (using the Auth0 **My Account API**) where a user logged in with one IdP can attach a Google identity for Token Vault use, without changing their primary login.
 
-Stack: FastAPI · Authlib · Starlette `SessionMiddleware` · Jinja2 · OpenAI Python SDK · `httpx` · `google-api-python-client`.
+Stack: FastAPI · `auth0-fastapi` (Auth0's official web-app SDK; replaces Authlib) · Starlette `SessionMiddleware` · Jinja2 · OpenAI Python SDK · `httpx` · `google-api-python-client`.
+
+The SDK auto-registers `/auth/login`, `/auth/callback`, and `/auth/logout` via `register_auth_routes`. Tools (Token Vault, My Account API, Google APIs) are still called directly from the same process via `httpx`.
 
 ---
 
@@ -52,10 +54,10 @@ Stack: FastAPI · Authlib · Starlette `SessionMiddleware` · Jinja2 · OpenAI P
 | Method | Path | Purpose |
 |---|---|---|
 | GET | `/` | Home; redirects logged-in users to `/chat` |
-| GET | `/login` | Universal Auth0 login (any IdP) |
-| GET | `/connect/google-calendar` | Auth0 login pinned to `connection=google-oauth2` with Calendar scope at consent |
-| GET | `/callback` | OAuth callback; stores ID token claims, access token, refresh token in session |
-| GET | `/logout` | Clears session and redirects through Auth0's `/v2/logout` |
+| GET | `/auth/login` | Universal Auth0 login (any IdP) — auto-registered by SDK |
+| GET | `/auth/callback` | OAuth callback — auto-registered by SDK |
+| GET | `/auth/logout` | Clears session + Auth0 logout — auto-registered by SDK |
+| GET | `/connect/google-calendar` | Redirects to `/auth/login?connection=google-oauth2&connection_scope=...` for federated Calendar/Gmail consent at first login |
 | GET | `/profile` | Renders ID/access token claims |
 | GET | `/chat` | Chat page; renders prior conversation from session |
 | POST | `/chat` | Non-streaming form-submit fallback (no JS) |

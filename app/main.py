@@ -2,15 +2,17 @@ import base64
 import json
 import os
 import secrets
-from urllib.parse import quote_plus, urlencode
 
-from authlib.integrations.starlette_client import OAuth
-from openai import AsyncOpenAI
+from auth0_fastapi.auth.auth_client import AuthClient
+from auth0_fastapi.config import Auth0Config
+from auth0_fastapi.server.routes import register_auth_routes
+from auth0_fastapi.server.routes import router as auth_router
 from dotenv import load_dotenv
-from fastapi import FastAPI, Request
+from fastapi import Depends, FastAPI, Request, Response
 from fastapi.responses import JSONResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from openai import AsyncOpenAI
 from starlette.middleware.sessions import SessionMiddleware
 
 from tools.auth0_my_account import (
@@ -34,6 +36,10 @@ from tools.google_gmail import (
 )
 
 MAX_TOOL_ITERATIONS = 3
+GOOGLE_CONNECTION_SCOPES = [
+    "https://www.googleapis.com/auth/calendar.events",
+    "https://www.googleapis.com/auth/gmail.readonly",
+]
 
 load_dotenv(override=True)
 
@@ -46,24 +52,39 @@ app.add_middleware(
     https_only=False,
 )
 app.mount("/static", StaticFiles(directory="static"), name="static")
-
 templates = Jinja2Templates(directory="templates")
 
-oauth = OAuth()
-oauth.register(
-    "auth0",
-    client_id=os.environ["AUTH0_CLIENT_ID"],
-    client_secret=os.environ["AUTH0_CLIENT_SECRET"],
-    client_kwargs={
-        "scope": (
-            "openid profile email offline_access "
-            "create:me:connected_accounts "
-            "read:me:connected_accounts "
-            "delete:me:connected_accounts"
-        ),
-    },
-    server_metadata_url=f'https://{os.environ["AUTH0_DOMAIN"]}/.well-known/openid-configuration',
-)
+
+# ---------- Auth0 SDK setup ----------
+
+_authorization_params = {
+    "scope": (
+        "openid profile email offline_access "
+        "create:me:connected_accounts "
+        "read:me:connected_accounts "
+        "delete:me:connected_accounts"
+    ),
+}
+
+_auth0_kwargs = {
+    "domain": os.environ["AUTH0_DOMAIN"],
+    "client_id": os.environ["AUTH0_CLIENT_ID"],
+    "client_secret": os.environ["AUTH0_CLIENT_SECRET"],
+    "app_base_url": os.environ.get("APP_BASE_URL", "http://localhost:8000"),
+    "secret": os.environ["APP_SECRET_KEY"],
+    "authorization_params": _authorization_params,
+}
+if os.environ.get("AUTH0_AUDIENCE"):
+    _auth0_kwargs["audience"] = os.environ["AUTH0_AUDIENCE"]
+
+auth0_config = Auth0Config(**_auth0_kwargs)
+auth_client = AuthClient(auth0_config)
+app.state.config = auth0_config
+app.state.auth_client = auth_client
+register_auth_routes(auth_router, auth0_config)
+app.include_router(auth_router)
+# After this, /auth/login, /auth/callback, /auth/logout are wired up.
+
 
 openai_client = AsyncOpenAI(
     api_key=os.environ["OPENAI_API_KEY"],
@@ -72,78 +93,28 @@ openai_client = AsyncOpenAI(
 LLM_MODEL = os.environ.get("LLM_MODEL", "gpt-4o-mini")
 
 
-@app.get("/")
-async def home(request: Request):
-    user = request.session.get("user")
-    if user:
-        return RedirectResponse(url="/chat")
-    return templates.TemplateResponse(request=request, name="home.html")
+# ---------- helpers ----------
 
 
-def _audience_kwargs() -> dict:
-    audience = os.environ.get("AUTH0_AUDIENCE")
-    return {"audience": audience} if audience else {}
+def _store_options(request: Request, response: Response) -> dict:
+    return {"request": request, "response": response}
 
 
-@app.get("/login")
-async def login(request: Request):
-    redirect_uri = request.url_for("callback")
-    return await oauth.auth0.authorize_redirect(
-        request, str(redirect_uri), **_audience_kwargs()
+async def _get_session(request: Request, response: Response) -> dict | None:
+    return await auth_client.client.get_session(
+        store_options=_store_options(request, response)
     )
 
 
-GOOGLE_CONNECTION_SCOPES = [
-    "https://www.googleapis.com/auth/calendar.events",
-    "https://www.googleapis.com/auth/gmail.readonly",
-]
-
-
-@app.get("/connect/google-calendar")
-async def connect_google_calendar(request: Request):
-    redirect_uri = request.url_for("callback")
-    return await oauth.auth0.authorize_redirect(
-        request,
-        str(redirect_uri),
-        connection="google-oauth2",
-        connection_scope=" ".join(GOOGLE_CONNECTION_SCOPES),
-        **_audience_kwargs(),
-    )
-
-
-@app.get("/callback")
-async def callback(request: Request):
-    token = await oauth.auth0.authorize_access_token(request)
-    request.session["user"] = token["userinfo"]
-    request.session["id_token_claims"] = dict(token["userinfo"])
-    request.session["access_token"] = token.get("access_token", "")
-    request.session["refresh_token"] = token.get("refresh_token", "")
-    return RedirectResponse(url="/chat")
-
-
-@app.get("/logout")
-async def logout(request: Request):
-    request.session.clear()
-    return RedirectResponse(
-        "https://"
-        + os.environ["AUTH0_DOMAIN"]
-        + "/v2/logout?"
-        + urlencode(
-            {
-                "returnTo": str(request.url_for("home")),
-                "client_id": os.environ["AUTH0_CLIENT_ID"],
-            },
-            quote_via=quote_plus,
-        )
+async def _get_user(request: Request, response: Response) -> dict | None:
+    return await auth_client.client.get_user(
+        store_options=_store_options(request, response)
     )
 
 
 def decode_jwt_claims(token: str) -> dict:
-    """Decode the payload of a *signed* JWT (JWS, 3 segments).
-    Returns {} for opaque tokens or JWE-encrypted tokens whose payload
-    cannot be decoded without the issuer's encryption key."""
     try:
-        parts = token.split(".")
+        parts = (token or "").split(".")
         if len(parts) != 3:
             return {}
         payload = parts[1]
@@ -154,12 +125,10 @@ def decode_jwt_claims(token: str) -> dict:
 
 
 def decode_jwt_header(token: str) -> dict:
-    """Decode the header of any JWT (JWS or JWE) — the header is always
-    plaintext base64-url-encoded JSON. Returns {} for non-JWT tokens."""
     try:
         if not token or "." not in token:
             return {}
-        header = token.split(".")[0]
+        header = (token or "").split(".")[0]
         header += "=" * (-len(header) % 4)
         return json.loads(base64.urlsafe_b64decode(header))
     except Exception:
@@ -167,7 +136,6 @@ def decode_jwt_header(token: str) -> dict:
 
 
 def classify_token(token: str) -> str:
-    """jws (3 segments), jwe (5 segments), opaque (non-empty other), empty."""
     if not token:
         return "empty"
     dots = token.count(".")
@@ -178,10 +146,8 @@ def classify_token(token: str) -> str:
     return "opaque"
 
 
-def build_system_prompt(request: Request) -> str:
-    user = request.session.get("user") or {}
-    id_token_claims = request.session.get("id_token_claims") or {}
-    access_token = request.session.get("access_token", "")
+def build_system_prompt(user: dict | None, access_token: str) -> str:
+    user = user or {}
     access_token_claims = decode_jwt_claims(access_token) if access_token else {}
 
     profile = {
@@ -193,7 +159,7 @@ def build_system_prompt(request: Request) -> str:
         "locale": user.get("locale"),
         "sub": user.get("sub"),
         "email_verified": user.get("email_verified"),
-        "id_token_claims": id_token_claims,
+        "id_token_claims": user,
         "access_token_claims": access_token_claims,
     }
     profile = {k: v for k, v in profile.items() if v not in (None, "", {}, [])}
@@ -209,74 +175,77 @@ def build_system_prompt(request: Request) -> str:
     )
 
 
+# ---------- pages ----------
+
+
+@app.get("/")
+async def home(request: Request, response: Response):
+    user = await _get_user(request, response)
+    if user:
+        return RedirectResponse(url="/chat")
+    return templates.TemplateResponse(request=request, name="home.html")
+
+
+@app.get("/connect/google-calendar")
+async def connect_google_calendar(request: Request):
+    # Trigger the SDK's login flow but pin the federated connection and
+    # request the Calendar/Gmail scopes at the upstream IdP.
+    from urllib.parse import urlencode
+
+    params = {
+        "connection": "google-oauth2",
+        "connection_scope": " ".join(GOOGLE_CONNECTION_SCOPES),
+    }
+    return RedirectResponse(url=f"/auth/login?{urlencode(params)}")
+
+
 @app.get("/profile")
-async def profile(request: Request):
-    user = request.session.get("user")
+async def profile(request: Request, response: Response):
+    user = await _get_user(request, response)
     if not user:
-        return RedirectResponse(url="/login")
-    id_token_claims = request.session.get("id_token_claims", {})
-    access_token = request.session.get("access_token", "")
+        return RedirectResponse(url="/auth/login")
+    session = await _get_session(request, response) or {}
+
+    access_token = session.get("access_token") or ""
     access_token_kind = classify_token(access_token)
     access_token_header = decode_jwt_header(access_token) if access_token else {}
     access_token_claims = (
         decode_jwt_claims(access_token) if access_token_kind == "jws" else {}
     )
+
     return templates.TemplateResponse(
         request=request,
         name="profile.html",
         context={
             "user": user,
-            "id_token_claims": id_token_claims,
-            "id_token_claims_pretty": json.dumps(id_token_claims, indent=2),
+            "id_token_claims": user,
+            "id_token_claims_pretty": json.dumps(user, indent=2, default=str),
             "access_token": access_token,
             "access_token_kind": access_token_kind,
             "access_token_header": access_token_header,
-            "access_token_header_pretty": json.dumps(access_token_header, indent=2),
+            "access_token_header_pretty": json.dumps(
+                access_token_header, indent=2, default=str
+            ),
             "access_token_claims": access_token_claims,
-            "access_token_claims_pretty": json.dumps(access_token_claims, indent=2),
+            "access_token_claims_pretty": json.dumps(
+                access_token_claims, indent=2, default=str
+            ),
         },
     )
 
 
 @app.get("/chat")
-async def chat_page(request: Request):
-    user = request.session.get("user")
+async def chat_page(request: Request, response: Response):
+    user = await _get_user(request, response)
     if not user:
-        return RedirectResponse(url="/login")
+        return RedirectResponse(url="/auth/login")
     messages = request.session.get("conversation", [])
     return templates.TemplateResponse(
         request=request, name="chat.html", context={"user": user, "messages": messages}
     )
 
 
-@app.post("/chat")
-async def chat_submit(request: Request):
-    user = request.session.get("user")
-    if not user:
-        return RedirectResponse(url="/login")
-
-    form = await request.form()
-    user_message = form.get("message", "").strip()
-    if not user_message:
-        return RedirectResponse(url="/chat", status_code=303)
-
-    conversation = request.session.get("conversation", [])
-    conversation.append({"role": "user", "content": user_message})
-
-    try:
-        response = await openai_client.chat.completions.create(
-            model=LLM_MODEL,
-            messages=[{"role": "system", "content": build_system_prompt(request)}] + conversation,
-        )
-        assistant_message = response.choices[0].message.content
-    except Exception as e:
-        print(f"OpenAI API error: {type(e).__name__}: {e}")
-        assistant_message = f"Error: {type(e).__name__}: {e}"
-
-    conversation.append({"role": "assistant", "content": assistant_message})
-    request.session["conversation"] = conversation
-
-    return RedirectResponse(url="/chat", status_code=303)
+# ---------- chat ----------
 
 
 async def dispatch_tool(name: str, args: dict, refresh_token: str) -> str:
@@ -313,8 +282,9 @@ GOOGLE_TOOL_SCHEMAS = [
 
 
 @app.post("/chat/stream")
-async def chat_stream(request: Request):
-    if not request.session.get("user"):
+async def chat_stream(request: Request, response: Response):
+    user = await _get_user(request, response)
+    if not user:
         return JSONResponse({"error": "unauthorized"}, status_code=401)
 
     body = await request.json()
@@ -322,10 +292,13 @@ async def chat_stream(request: Request):
     if not user_message:
         return JSONResponse({"error": "empty message"}, status_code=400)
 
-    refresh_token = request.session.get("refresh_token", "")
+    session = await _get_session(request, response) or {}
+    refresh_token = session.get("refresh_token") or ""
+    access_token = session.get("access_token") or ""
     conversation = request.session.get("conversation", [])
+
     messages = (
-        [{"role": "system", "content": build_system_prompt(request)}]
+        [{"role": "system", "content": build_system_prompt(user, access_token)}]
         + conversation
         + [{"role": "user", "content": user_message}]
     )
@@ -405,8 +378,9 @@ async def chat_stream(request: Request):
 
 
 @app.post("/chat/save")
-async def chat_save(request: Request):
-    if not request.session.get("user"):
+async def chat_save(request: Request, response: Response):
+    user = await _get_user(request, response)
+    if not user:
         return JSONResponse({"error": "unauthorized"}, status_code=401)
 
     body = await request.json()
@@ -422,15 +396,19 @@ async def chat_save(request: Request):
     return JSONResponse({"ok": True})
 
 
+# ---------- connections (My Account API) ----------
+
+
 @app.get("/connections")
-async def connections_page(request: Request):
-    user = request.session.get("user")
+async def connections_page(request: Request, response: Response):
+    user = await _get_user(request, response)
     if not user:
-        return RedirectResponse(url="/login")
+        return RedirectResponse(url="/auth/login")
+    session = await _get_session(request, response) or {}
 
     accounts: list[dict] = []
     error: str | None = None
-    refresh_token = request.session.get("refresh_token", "")
+    refresh_token = session.get("refresh_token") or ""
     try:
         token = await mint_my_account_token(refresh_token)
         accounts = await list_accounts(token)
@@ -450,11 +428,13 @@ async def connections_page(request: Request):
 
 
 @app.post("/connections/connect/{connection}")
-async def connections_connect(request: Request, connection: str):
-    if not request.session.get("user"):
-        return RedirectResponse(url="/login")
+async def connections_connect(request: Request, response: Response, connection: str):
+    user = await _get_user(request, response)
+    if not user:
+        return RedirectResponse(url="/auth/login")
+    session = await _get_session(request, response) or {}
+    refresh_token = session.get("refresh_token") or ""
 
-    refresh_token = request.session.get("refresh_token", "")
     redirect_uri = str(request.url_for("connections_callback"))
     state = secrets.token_urlsafe(24)
 
@@ -473,6 +453,8 @@ async def connections_connect(request: Request, connection: str):
             scopes=scopes,
         )
     except MyAccountError as e:
+        from urllib.parse import quote_plus
+
         return RedirectResponse(
             url=f"/connections?error={quote_plus(str(e))}", status_code=303
         )
@@ -497,8 +479,9 @@ async def connections_callback(request: Request):
 
 
 @app.post("/connections/complete")
-async def connections_complete(request: Request):
-    if not request.session.get("user"):
+async def connections_complete(request: Request, response: Response):
+    user = await _get_user(request, response)
+    if not user:
         return JSONResponse({"error": "unauthorized"}, status_code=401)
 
     body = await request.json()
@@ -513,7 +496,8 @@ async def connections_complete(request: Request):
     if state and pending.get("state") and state != pending["state"]:
         return JSONResponse({"error": "state mismatch"}, status_code=400)
 
-    refresh_token = request.session.get("refresh_token", "")
+    session = await _get_session(request, response) or {}
+    refresh_token = session.get("refresh_token") or ""
     try:
         token = await mint_my_account_token(refresh_token)
         await complete_connect(
@@ -531,15 +515,21 @@ async def connections_complete(request: Request):
 
 
 @app.post("/connections/disconnect/{account_id}")
-async def connections_disconnect(request: Request, account_id: str):
-    if not request.session.get("user"):
-        return RedirectResponse(url="/login")
+async def connections_disconnect(
+    request: Request, response: Response, account_id: str
+):
+    user = await _get_user(request, response)
+    if not user:
+        return RedirectResponse(url="/auth/login")
+    session = await _get_session(request, response) or {}
+    refresh_token = session.get("refresh_token") or ""
 
-    refresh_token = request.session.get("refresh_token", "")
     try:
         token = await mint_my_account_token(refresh_token)
         await delete_account(token, account_id)
     except MyAccountError as e:
+        from urllib.parse import quote_plus
+
         return RedirectResponse(
             url=f"/connections?error={quote_plus(str(e))}", status_code=303
         )

@@ -24,12 +24,12 @@ Open the new app's **Settings** tab. Scroll down to **Application URIs**.
 
 - **Allowed Callback URLs** — paste this list, comma-separated:
   ```
-  http://localhost:8000/callback,
-  http://127.0.0.1:8000/callback,
+  http://localhost:8000/auth/callback,
+  http://127.0.0.1:8000/auth/callback,
   http://localhost:8000/connections/callback,
   http://127.0.0.1:8000/connections/callback
   ```
-  Both `localhost` and `127.0.0.1` are needed because `request.url_for("callback")` resolves based on which host you visit the app at.
+  The `auth0-fastapi` SDK auto-registers the OAuth callback at **`/auth/callback`** (note the `/auth/` prefix). Both `localhost` and `127.0.0.1` are needed because the redirect URI sent to Auth0 is built from whichever host you visit the app at.
 
 - **Allowed Logout URLs**:
   ```
@@ -224,7 +224,7 @@ Before testing the app at runtime, walk this list. Most "it doesn't work" report
 
 | ✓ | Check |
 |---|---|
-| ☐ | App's Allowed Callback URLs include all 4 (`/callback` and `/connections/callback`, on both `localhost` and `127.0.0.1`) |
+| ☐ | App's Allowed Callback URLs include all 4 (`/auth/callback` and `/connections/callback`, on both `localhost` and `127.0.0.1`) |
 | ☐ | App's **Refresh Token Rotation** is **off** |
 | ☐ | App's **Token Vault** grant type is enabled (Advanced → Grant Types) |
 | ☐ | A custom Auth0 API exists with `RS256` and your application is authorized for it (User-Delegated Access) |

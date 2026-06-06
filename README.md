@@ -2,7 +2,7 @@
 
 A small, end-to-end template that pairs **Auth0 login** with an **LLM-powered chat** that can call third-party APIs on the signed-in user's behalf via **Auth0 Token Vault**, plus a **Connected Accounts** page (Auth0 My Account API) so users can attach a Google identity to a non-Google primary login.
 
-Built with FastAPI + Authlib + Jinja templates + the OpenAI SDK. No LangGraph, no React, no `auth0-ai-*` SDK — Auth0's HTTP endpoints are called directly with `httpx`. Fewer moving parts means a clearer mental model for workshop attendees.
+Built with FastAPI + Auth0's official `auth0-fastapi` web-app SDK + Jinja templates + the OpenAI SDK. Single process, single `pip install`, single `uvicorn`. No LangGraph, no React, no separate backend service.
 
 ## What you get out of the box
 
@@ -47,10 +47,10 @@ This is the part that tends to trip workshop attendees up. **For the full step-b
 
 #### Application settings (Applications → your Regular Web App → Settings)
 
-- **Allowed Callback URLs** — comma-separated:
+- **Allowed Callback URLs** — comma-separated (note `/auth/callback`, not `/callback` — that's the SDK's convention):
   ```
-  http://localhost:8000/callback,
-  http://127.0.0.1:8000/callback,
+  http://localhost:8000/auth/callback,
+  http://127.0.0.1:8000/auth/callback,
   http://localhost:8000/connections/callback,
   http://127.0.0.1:8000/connections/callback
   ```
@@ -99,8 +99,8 @@ Open http://127.0.0.1:8000 → Login → walk through any IdP → land on `/chat
 | Want to... | Do this |
 |---|---|
 | Inspect token claims | Open `/profile` |
-| Use Calendar via Google primary login | `/login`, pick Google, accept Calendar at consent. Then ask: *"What's on my calendar this week?"* |
-| Use Calendar via non-Google primary login | `/login`, pick GitHub (or any IdP). Then visit `/connections` → "Connect Google Account" → consent → Calendar tool now works in chat. |
+| Use Calendar via Google primary login | `/auth/login`, pick Google, accept Calendar at consent. Then ask: *"What's on my calendar this week?"* |
+| Use Calendar via non-Google primary login | `/auth/login`, pick GitHub (or any IdP). Then visit `/connections` → "Connect Google Account" → consent → Calendar tool now works in chat. |
 | Disconnect a federated identity | `/connections` → click "Disconnect" on the row |
 
 ## Architecture, deep dive, and gotchas
@@ -122,7 +122,7 @@ Three different actors can throw a "redirect_uri" error and the wording is simil
 |---|---|
 | Google OAuth error page | Google Cloud Console → your OAuth client → Authorized redirect URIs. Add `https://{AUTH0_DOMAIN}/login/callback` |
 | github.com OAuth error | github.com/settings/developers → your OAuth app → Authorization callback URL. Set to `https://{AUTH0_DOMAIN}/login/callback` |
-| Auth0 "Be careful!" page | Auth0 → Applications → your app → Allowed Callback URLs. Add the local URLs from Step 3 |
+| Auth0 "Be careful!" page | Auth0 → Applications → your app → Allowed Callback URLs. Add the four local URLs from Step 3 (note `/auth/callback`, not `/callback`) |
 
 ### `localhost` vs `127.0.0.1`
 
