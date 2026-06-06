@@ -1,0 +1,70 @@
+{% extends "base.html" %}
+{% set active = 'companies' %}
+{% block title %}{{ company.display_name }} — CompassZero{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>{{ company.display_name }}</h1>
+    <span class="muted"><code>{{ company.org_name }}</code></span>
+</div>
+
+<div class="detail-grid">
+    <div class="field">
+        <div class="field-label">Annual budget</div>
+        <div class="field-value">{{ company.currency }} {{ '{:,.0f}'.format(company.budget) }}</div>
+    </div>
+    <div class="field">
+        <div class="field-label">Spent year-to-date</div>
+        <div class="field-value">{{ company.currency }} {{ '{:,.0f}'.format(company.spent) }}</div>
+        {% set pct = (company.spent / company.budget * 100) if company.budget else 0 %}
+        <div class="bar" style="margin-top:0.5rem">
+            <div class="bar-fill {% if pct > 100 %}over{% elif pct > 80 %}warning{% endif %}" style="width: {{ [pct, 100]|min }}%"></div>
+        </div>
+    </div>
+</div>
+
+<div class="card">
+    <h2>Travel agents</h2>
+    {% if agents %}
+    <table>
+        <thead><tr><th>ID</th><th>Name</th><th>Email</th></tr></thead>
+        <tbody>
+        {% for a in agents %}<tr><td><code>{{ a.id }}</code></td><td>{{ a.name }}</td><td>{{ a.email }}</td></tr>{% endfor %}
+        </tbody>
+    </table>
+    {% else %}<p class="muted">No agents assigned.</p>{% endif %}
+</div>
+
+<div class="card">
+    <h2>Customers</h2>
+    {% if customers %}
+    <table>
+        <thead><tr><th>ID</th><th>Name</th><th>Email</th><th>Agent</th></tr></thead>
+        <tbody>
+        {% for c in customers %}<tr><td><code>{{ c.id }}</code></td><td>{{ c.name }}</td><td>{{ c.email }}</td><td>{{ agent_names.get(c.agent_id, c.agent_id or '—') }}</td></tr>{% endfor %}
+        </tbody>
+    </table>
+    {% else %}<p class="muted">No customers.</p>{% endif %}
+</div>
+
+<div class="card">
+    <h2>Trips</h2>
+    {% if trips %}
+    <table>
+        <thead><tr><th>Trip</th><th>Customer</th><th>Route</th><th>Dates</th><th>Cost</th><th>Status</th></tr></thead>
+        <tbody>
+        {% for t in trips %}
+            <tr>
+                <td><a href="/trips/{{ t.id }}"><code>{{ t.id }}</code></a> · {{ t.type }}</td>
+                <td>{{ customer_names.get(t.customer_id, t.customer_id) }}</td>
+                <td>{{ t.origin }} → {{ t.destination }}</td>
+                <td>{{ t.depart_date }} – {{ t.return_date }}</td>
+                <td>{{ t.currency }} {{ '{:,.0f}'.format(t.cost) }}</td>
+                <td><span class="status-badge {{ t.status }}">{{ t.status }}</span></td>
+            </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    {% else %}<p class="muted">No trips on file.</p>{% endif %}
+</div>
+{% endblock %}

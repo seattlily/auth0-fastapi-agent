@@ -1,169 +1,128 @@
-# Auth0 + FastAPI Agent Template
+# CompassZero
 
-A small, end-to-end template that pairs **Auth0 login** with an **LLM-powered chat** that can call third-party APIs on the signed-in user's behalf via **Auth0 Token Vault**, plus a **Connected Accounts** page (Auth0 My Account API) so users can attach a Google identity to a non-Google primary login.
+A B2B travel-management demo that pairs **Auth0 RBAC + Organizations** with an **AI assistant whose tools are gated by the signed-in user's permissions**. Three roles, three dashboards, one chat that does different things depending on who's asking.
 
-Built with FastAPI + Auth0's official `auth0-fastapi` web-app SDK + Jinja templates + the OpenAI SDK. Single process, single `pip install`, single `uvicorn`. No LangGraph, no React, no separate backend service.
+Built as a workshop template — single FastAPI process, official `auth0-fastapi` SDK for login, custom hand-written CSS, mock in-memory data.
 
-## What you get out of the box
+## What you get
 
-- **Auth0 OAuth login** (Authorization Code Flow with OIDC). Universal login screen — works with any IdP you've enabled (Google, GitHub, username/password, etc.).
-- **Streaming chat UI** that talks to an OpenAI Chat Completions–compatible LLM. Tokens stream in token-by-token (`fetch` + `ReadableStream`).
-- **Profile-aware system prompt** — the signed-in user's ID/access token claims are injected into the system prompt so the model can personalize replies.
-- **Token Vault → Google Calendar tool** — the LLM can call `list_upcoming_calendar_events` via OpenAI function calling. The backend exchanges the user's Auth0 refresh token at Token Vault for a Google access token and calls the Calendar API.
-- **Connected Accounts UI** at `/connections` — list, connect, and disconnect federated identities through the Auth0 My Account API. A user logged in via GitHub can attach Google for tool use without changing their primary login.
-- **Profile inspector** at `/profile` — shows raw ID/access token claims for debugging.
+- **Three roles** wired through Auth0 Roles + a CompassZero API with 11 scopes:
+  - **CompassZero admin** — every company, every customer, every trip; can create companies and customers.
+  - **Travel agent** — sees only their own travel agency's customers and bookings; can book trips and experiences for them.
+  - **Customer** — sees only their own bookings; the AI assistant lists trips and experiences but can't write anything.
+- **Auth0 Organizations** as the multi-tenant boundary — each travel-agency company is an Auth0 Organization and the user's `org_name` claim drives the data filter.
+- **AI chat** with permission-gated tools — the model's tool list is filtered to whatever the user has scope for, so a customer never even sees `book_trip`. Backed by `gpt-4o-mini` (or any function-calling-capable chat model).
+- **Calendar / Gmail tools via Token Vault** — agents and admins can ask the assistant to add a trip to their calendar or summarize itineraries from email. Same Connected Accounts flow as before, gated to `book:trips` permission.
+- **Profile inspector** at `/profile` — shows your role, permissions, organization, and raw token claims.
+
+## Architecture (one process)
+
+```
+┌──────────────────────────────────┐
+│  CompassZero (FastAPI :8000)     │
+│                                   │
+│  • auth0-fastapi (web SDK)       │  ← login / session / refresh tokens
+│  • permissions.py + Roles        │  ← reads `permissions` claim from access token
+│  • Jinja templates per role      │  ← role-aware dashboards & lists
+│  • tools/compasszero.py          │  ← chat tools, each requires a scope
+│  • tools/google_calendar.py +    │
+│    google_gmail.py + Token Vault │  ← Calendar/Gmail tools (agents+admins only)
+│  • mock_data.py                  │  ← in-memory companies/customers/trips
+└──────────────────────────────────┘
+```
+
+No separate backend, no React, no LangGraph. The chat tools are Python functions with permission checks; the model only ever sees tools the user has scope for.
 
 ## Quick start
 
-### 1. Install
+### 0. Auth0 dashboard — generic onboarding
+
+Read [`AUTH0_SETUP.md`](./AUTH0_SETUP.md) end-to-end first. It walks through the Regular Web App, callback URLs, Token Vault grant, refresh-token-rotation off, MRRT, and Google/GitHub social connections.
+
+### 0.5. Auth0 dashboard — CompassZero specifics
+
+Read [`AUTH0_API_DEFINITIONS.md`](./AUTH0_API_DEFINITIONS.md). It defines:
+- The CompassZero API and its 11 scopes
+- The 3 Roles (`compass_admin`, `travel_agent`, `customer`)
+- The 3 Auth0 Organizations
+- Test users + `app_metadata`
+- The post-login Action that propagates `customer_id` / `agent_id` claims
+
+### 1. Run the app
 
 ```bash
-git clone https://github.com/<your-org>/auth0-fastapi-agent.git
-cd auth0-fastapi-agent/app
-
-python3.11 -m venv venv          # 3.11 or 3.12 recommended; see "Known issues" below
+cd app
+python3.11 -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
-```
-
-### 2. Copy `.env.example` to `.env`
-
-```bash
 cp .env.example .env
-```
+# Fill in AUTH0_DOMAIN, AUTH0_CLIENT_ID, AUTH0_CLIENT_SECRET,
+# APP_SECRET_KEY (python3 -c "import secrets; print(secrets.token_hex(32))"),
+# OPENAI_API_KEY. AUTH0_AUDIENCE defaults to https://compasszero.api.
 
-Fill in:
-
-- `AUTH0_DOMAIN`, `AUTH0_CLIENT_ID`, `AUTH0_CLIENT_SECRET` — from your Auth0 Regular Web Application's Settings page.
-- `APP_SECRET_KEY` — generate with `python -c "import secrets; print(secrets.token_hex(32))"`.
-- `OPENAI_API_KEY` — your OpenAI key (or any OpenAI-compatible provider).
-- *(Optional)* `OPENAI_BASE_URL` — set if using a proxy or alternative provider. Defaults to `https://api.openai.com/v1`.
-- *(Optional)* `LLM_MODEL` — defaults to `gpt-4o-mini`. Any function-calling-capable chat model works.
-- *(Optional)* `AUTH0_AUDIENCE` — set if you want the access token issued at login to be a JWT for a specific Auth0 API. Leave unset for an opaque token.
-
-### 3. Auth0 dashboard configuration
-
-This is the part that tends to trip workshop attendees up. **For the full step-by-step walkthrough — including Google Cloud Console + GitHub OAuth setup and a flow-of-tokens explainer — see [`AUTH0_SETUP.md`](./AUTH0_SETUP.md).** The summary below is a skim:
-
-#### Application settings (Applications → your Regular Web App → Settings)
-
-- **Allowed Callback URLs** — comma-separated (note `/auth/callback`, not `/callback` — that's the SDK's convention):
-  ```
-  http://localhost:8000/auth/callback,
-  http://127.0.0.1:8000/auth/callback,
-  http://localhost:8000/connections/callback,
-  http://127.0.0.1:8000/connections/callback
-  ```
-- **Allowed Logout URLs**:
-  ```
-  http://localhost:8000/, http://127.0.0.1:8000/
-  ```
-
-#### Application settings — Token Vault
-
-- **Advanced → Grant Types**: enable `urn:auth0:params:oauth:grant-type:token-exchange:federated-connection-access-token` (the "Token Vault" grant).
-- **Settings**: disable **Allow Refresh Token Rotation**. Token Vault is incompatible with rotation.
-
-#### My Account API (APIs → My Account API)
-
-- **Activate** the API.
-- **Application Access** tab: authorize this app, check the three Connected Accounts scopes:
-  - `create:me:connected_accounts`
-  - `read:me:connected_accounts`
-  - `delete:me:connected_accounts`
-- **Settings → Access Settings**: enable "Allow Skipping User Consent".
-
-#### Multi-Resource Refresh Token (MRRT)
-
-- **Application → Multi-Resource Refresh Token**: enable MRRT for the My Account API.
-
-#### Federated connection (Authentication → Social → Google)
-
-- Configure with your **own** Google OAuth client (don't ship Auth0's dev keys to production).
-- In the Google Cloud Console for that OAuth client, add this URL to **Authorized redirect URIs**:
-  ```
-  https://{YOUR_AUTH0_DOMAIN}/login/callback
-  ```
-- Add `https://www.googleapis.com/auth/calendar.readonly` to the OAuth consent screen scopes. If the consent screen is in **Testing** mode, add your Google account as a Test user.
-
-### 4. Run
-
-```bash
 uvicorn main:app --reload --host 127.0.0.1 --port 8000
 ```
 
-Open http://127.0.0.1:8000 → Login → walk through any IdP → land on `/chat`.
+Open http://127.0.0.1:8000 → Sign in → land on `/dashboard`.
 
-## Try the features
+### 2. Try each role
 
-| Want to... | Do this |
+| Login as | What you should see |
 |---|---|
-| Inspect token claims | Open `/profile` |
-| Use Calendar via Google primary login | `/auth/login`, pick Google, accept Calendar at consent. Then ask: *"What's on my calendar this week?"* |
-| Use Calendar via non-Google primary login | `/auth/login`, pick GitHub (or any IdP). Then visit `/connections` → "Connect Google Account" → consent → Calendar tool now works in chat. |
-| Disconnect a federated identity | `/connections` → click "Disconnect" on the row |
-
-## Architecture, deep dive, and gotchas
-
-See [`IMPLEMENTATION.md`](./IMPLEMENTATION.md) for:
-- Complete route map and request flow
-- Token Vault HTTP exchange spec (verbatim from Auth0 docs)
-- The four-call My Account API Connected Accounts flow
-- The URL-fragment quirk on the connect callback
-- A 10-item gotcha list for common runtime errors
-
-## Known issues
-
-### `redirect_uri_mismatch` errors
-
-Three different actors can throw a "redirect_uri" error and the wording is similar but the fix differs. Always copy the URL bar at the moment of the error — the host tells you which actor:
-
-| Error host | Where to fix |
-|---|---|
-| Google OAuth error page | Google Cloud Console → your OAuth client → Authorized redirect URIs. Add `https://{AUTH0_DOMAIN}/login/callback` |
-| github.com OAuth error | github.com/settings/developers → your OAuth app → Authorization callback URL. Set to `https://{AUTH0_DOMAIN}/login/callback` |
-| Auth0 "Be careful!" page | Auth0 → Applications → your app → Allowed Callback URLs. Add the four local URLs from Step 3 (note `/auth/callback`, not `/callback`) |
-
-### `localhost` vs `127.0.0.1`
-
-Whichever host you visit the app at is what gets baked into the redirect URI sent to Auth0. Both must be on Auth0's Allowed Callback URLs list, otherwise login fails depending on which URL you bookmarked.
-
-### Refresh tokens issued before scope changes don't carry the new scopes
-
-If you add a new scope (e.g., the connected_accounts scopes), users with a stale session will get `invalid_scope` on the first My Account API mint. **Have them log out and log back in** to get a fresh refresh token.
-
-### Python 3.14 + corporate zero-trust agents (Prisma Access, ZScaler)
-
-Python 3.14's stdlib socket layer can fail with `OSError: [Errno 9] Bad file descriptor` on TLS connections under intercepting agents. `pip` then can't reach pypi.
-
-**Workaround**: use Python 3.11 or 3.12 for the venv, and install with `uv pip install` (https://github.com/astral-sh/uv) — `uv` ships its own native HTTP client.
+| **admin** (`compass_admin` role) | KPI cards across all companies, full `/companies`, full `/customers`, full `/trips`. Chat: "list all customers", "create a new company called Wayne Industries with budget 500k". |
+| **travel agent** (`travel_agent` role + member of an Auth0 Org) | Their company's budget + recent bookings. `/customers` filtered to their org. Chat: "book a flight from JFK to LHR for Jane next month, $1200". |
+| **customer** (`customer` role + member of an Auth0 Org + `app_metadata.customer_id`) | Just their trips. The chat refuses booking and only sees `list_my_trips`. |
 
 ## Project layout
 
 ```
 .
-├── README.md                      # this file
-├── IMPLEMENTATION.md              # deep-dive reference
+├── README.md                       # this file
+├── IMPLEMENTATION.md               # deep-dive reference
+├── AUTH0_SETUP.md                  # Auth0 dashboard onboarding (generic)
+├── AUTH0_API_DEFINITIONS.md        # CompassZero-specific Auth0 setup
+├── .gitignore
 └── app/
     ├── .env.example
     ├── requirements.txt
-    ├── main.py                    # FastAPI app, all routes
+    ├── main.py                     # routes + chat tool dispatch
+    ├── mock_data.py                # in-memory data
+    ├── permissions.py              # token → user_context helper
     ├── tools/
-    │   ├── google_calendar.py     # Token Vault exchange + Calendar API
-    │   └── auth0_my_account.py    # My Account API: connect/list/delete
+    │   ├── compasszero.py          # CompassZero chat tools (10 of them)
+    │   ├── google_calendar.py      # Token Vault → Calendar
+    │   ├── google_gmail.py         # Token Vault → Gmail
+    │   └── auth0_my_account.py     # My Account API (Connected Accounts)
     ├── static/style.css
     └── templates/
+        ├── base.html
         ├── home.html
+        ├── dashboard.html
+        ├── companies.html
+        ├── company_detail.html
+        ├── customers.html
+        ├── trips.html
+        ├── trip_detail.html
         ├── chat.html
         ├── profile.html
         ├── connections.html
         └── connections_callback.html
 ```
 
+## Known issues
+
+### `redirect_uri_mismatch` errors
+
+Three different actors throw this; the wording is similar but the fix differs. See `IMPLEMENTATION.md` §8 for the diagnostic table.
+
+### Refresh tokens issued before scope changes don't carry the new scopes
+
+Common pitfall when you change Auth0 Roles or add a permission — the user's stale session has an old refresh token. **Log out and log back in.**
+
+### `Allow Offline Access` on the API must be ON
+
+Without it the access token is issued but no refresh token is — and Connected Accounts / chat tools that need Token Vault fail with "no refresh token in session".
+
 ## License
 
-MIT — feel free to fork, modify, or use as a workshop starter.
-
-## Contributing
-
-This is a workshop template; PRs that improve clarity or fix issues are welcome. Please don't add features that go beyond a "single-process FastAPI demo" — the value is in being readable in one sitting.
+MIT — fork it, modify it, use it as a workshop starter.

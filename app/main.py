@@ -8,13 +8,33 @@ from auth0_fastapi.config import Auth0Config
 from auth0_fastapi.server.routes import register_auth_routes
 from auth0_fastapi.server.routes import router as auth_router
 from dotenv import load_dotenv
-from fastapi import Depends, FastAPI, Request, Response
+from fastapi import FastAPI, Request, Response
 from fastapi.responses import JSONResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from openai import AsyncOpenAI
 from starlette.middleware.sessions import SessionMiddleware
 
+from mock_data import (
+    EXPERIENCES,
+    TRAVEL_AGENTS,
+    TRIPS,
+    get_agent,
+    get_agents,
+    get_companies,
+    get_company,
+    get_customer,
+    get_customers,
+    get_experiences_for_trip,
+    get_trip,
+    get_trips,
+)
+from permissions import (
+    PermissionDenied,
+    get_user_context,
+    has_any_permission,
+    has_permission,
+)
 from tools.auth0_my_account import (
     MyAccountError,
     complete_connect,
@@ -23,6 +43,9 @@ from tools.auth0_my_account import (
     list_accounts,
     mint_my_account_token,
 )
+from tools.compasszero import TOOLS as CZ_TOOLS
+from tools.compasszero import dispatch as cz_dispatch
+from tools.compasszero import visible_schemas as cz_visible_schemas
 from tools.google_calendar import (
     CALENDAR_TOOL_SCHEMA,
     CREATE_CALENDAR_EVENT_TOOL_SCHEMA,
@@ -30,12 +53,9 @@ from tools.google_calendar import (
     create_calendar_event,
     list_upcoming_calendar_events,
 )
-from tools.google_gmail import (
-    GMAIL_LIST_TOOL_SCHEMA,
-    list_recent_emails,
-)
+from tools.google_gmail import GMAIL_LIST_TOOL_SCHEMA, list_recent_emails
 
-MAX_TOOL_ITERATIONS = 3
+MAX_TOOL_ITERATIONS = 4
 GOOGLE_CONNECTION_SCOPES = [
     "https://www.googleapis.com/auth/calendar.events",
     "https://www.googleapis.com/auth/gmail.readonly",
@@ -43,7 +63,7 @@ GOOGLE_CONNECTION_SCOPES = [
 
 load_dotenv(override=True)
 
-app = FastAPI()
+app = FastAPI(title="CompassZero")
 
 app.add_middleware(
     SessionMiddleware,
@@ -57,22 +77,20 @@ templates = Jinja2Templates(directory="templates")
 
 # ---------- Auth0 SDK setup ----------
 
-_authorization_params = {
-    "scope": (
-        "openid profile email offline_access "
-        "create:me:connected_accounts "
-        "read:me:connected_accounts "
-        "delete:me:connected_accounts"
-    ),
-}
-
 _auth0_kwargs = {
     "domain": os.environ["AUTH0_DOMAIN"],
     "client_id": os.environ["AUTH0_CLIENT_ID"],
     "client_secret": os.environ["AUTH0_CLIENT_SECRET"],
     "app_base_url": os.environ.get("APP_BASE_URL", "http://localhost:8000"),
     "secret": os.environ["APP_SECRET_KEY"],
-    "authorization_params": _authorization_params,
+    "authorization_params": {
+        "scope": (
+            "openid profile email offline_access "
+            "create:me:connected_accounts "
+            "read:me:connected_accounts "
+            "delete:me:connected_accounts"
+        ),
+    },
 }
 if os.environ.get("AUTH0_AUDIENCE"):
     _auth0_kwargs["audience"] = os.environ["AUTH0_AUDIENCE"]
@@ -82,30 +100,21 @@ auth_client = AuthClient(auth0_config)
 
 
 def _relax_cookies_for_local_http(client) -> None:
-    """The auth0-fastapi SDK marks its session and transaction cookies
-    as Secure by default. On plain http://localhost the browser drops
-    those cookies, and /auth/callback then fails with
-    `400 transaction is missing`. For local-dev convenience we relax
-    secure=False here. Set USE_SECURE_COOKIES=true (and serve over
-    HTTPS) before deploying anywhere else."""
+    """SDK marks cookies as Secure by default — browsers drop them on http://localhost.
+    Fix the state cookie via cookie_options and patch the transaction store's set()."""
     import types
 
-    # State store: cookie_options is a public dict.
     state_store = getattr(client, "_state_store", None)
     if state_store is not None and hasattr(state_store, "cookie_options"):
         state_store.cookie_options["secure"] = False
         state_store.cookie_options["samesite"] = "lax"
 
-    # Transaction store: secure=True is hardcoded inside .set(); patch
-    # an instance method that mirrors the original but flips secure.
     transaction_store = getattr(client, "_transaction_store", None)
     if transaction_store is not None:
 
         async def _set_no_secure(self, identifier, value, options=None):
             if options is None or "response" not in options:
-                raise ValueError(
-                    "Response object is required in store options for cookie storage."
-                )
+                raise ValueError("Response object is required in store options.")
             response = options["response"]
             encrypted_value = self.encrypt(identifier, value.model_dump())
             response.set_cookie(
@@ -128,7 +137,6 @@ app.state.config = auth0_config
 app.state.auth_client = auth_client
 register_auth_routes(auth_router, auth0_config)
 app.include_router(auth_router)
-# After this, /auth/login, /auth/callback, /auth/logout are wired up.
 
 
 openai_client = AsyncOpenAI(
@@ -158,10 +166,6 @@ async def _get_user(request: Request, response: Response) -> dict | None:
 
 
 def _tokens_from_session(session: dict | None) -> tuple[str, str]:
-    """Return (access_token, refresh_token) from the SDK session. Both may
-    be empty strings. The auth0-fastapi SDK puts the refresh_token at the
-    TOP level of the session dict, but nests access_token inside the first
-    entry of token_sets[]."""
     s = session or {}
     refresh_token = s.get("refresh_token") or ""
     token_sets = s.get("token_sets") or []
@@ -205,116 +209,70 @@ def classify_token(token: str) -> str:
     return "opaque"
 
 
-def build_system_prompt(user: dict | None, access_token: str) -> str:
-    user = user or {}
-    access_token_claims = decode_jwt_claims(access_token) if access_token else {}
+async def require_login(request: Request, response: Response) -> tuple[dict, dict, dict]:
+    """Returns (user, session, ctx) or raises by returning a redirect via the caller.
+    Caller checks `if user is None: return RedirectResponse('/auth/login')`."""
+    user = await _get_user(request, response)
+    session = await _get_session(request, response) or {}
+    access_token, _ = _tokens_from_session(session)
+    access_claims = decode_jwt_claims(access_token)
+    ctx = get_user_context(access_claims, user or {})
+    return user, session, ctx
 
+
+def build_system_prompt(user: dict | None, ctx: dict) -> str:
     profile = {
-        "name": user.get("name"),
-        "email": user.get("email"),
-        "nickname": user.get("nickname"),
-        "given_name": user.get("given_name"),
-        "family_name": user.get("family_name"),
-        "locale": user.get("locale"),
-        "sub": user.get("sub"),
-        "email_verified": user.get("email_verified"),
-        "id_token_claims": user,
-        "access_token_claims": access_token_claims,
+        "name": (user or {}).get("name"),
+        "email": (user or {}).get("email"),
+        "role": ctx.get("role"),
+        "org_name": ctx.get("org_name"),
+        "customer_id": ctx.get("customer_id"),
+        "agent_id": ctx.get("agent_id"),
+        "permissions": sorted(ctx.get("permissions") or []),
     }
-    profile = {k: v for k, v in profile.items() if v not in (None, "", {}, [])}
+    profile = {k: v for k, v in profile.items() if v not in (None, "", [], {})}
 
     return (
-        "You are a helpful AI assistant. The signed-in user's profile, derived "
-        "from their Auth0 ID and access tokens, is provided below as JSON. Use "
-        "it to personalize responses (greet them by name, tailor advice to "
-        "their email/locale, reference roles or scopes from their access "
-        "token claims when relevant). Do not reveal raw token values or the "
-        "literal JSON unless the user asks for them.\n\n"
+        "You are the CompassZero AI assistant — CompassZero is a B2B travel "
+        "platform. Your tools are filtered to match the signed-in user's "
+        "Auth0 permissions, so only call what's available to you. Use the "
+        "user profile below to personalize answers and decide which tool to "
+        "call. When booking on behalf of customers, always confirm key "
+        "details (dates, cost, customer_id) before invoking a write tool. "
+        "If a user asks for something outside their role, politely explain "
+        "what they can do instead.\n\n"
         f"User profile:\n{json.dumps(profile, indent=2, default=str)}"
     )
 
 
-# ---------- pages ----------
+# Calendar / Gmail tools — gated to users who can book trips (agents + admins).
+GOOGLE_TOOL_REQUIRED = "book:trips"
+GOOGLE_TOOLS_BY_NAME = {
+    "list_upcoming_calendar_events": (CALENDAR_TOOL_SCHEMA, list_upcoming_calendar_events),
+    "create_calendar_event": (CREATE_CALENDAR_EVENT_TOOL_SCHEMA, create_calendar_event),
+    "list_recent_emails": (GMAIL_LIST_TOOL_SCHEMA, list_recent_emails),
+}
 
 
-@app.get("/")
-async def home(request: Request, response: Response):
-    user = await _get_user(request, response)
-    if user:
-        return RedirectResponse(url="/chat")
-    return templates.TemplateResponse(request=request, name="home.html")
+def visible_google_schemas(ctx: dict) -> list[dict]:
+    if not has_permission(ctx, GOOGLE_TOOL_REQUIRED):
+        return []
+    return [s for s, _ in GOOGLE_TOOLS_BY_NAME.values()]
 
 
-@app.get("/connect/google-calendar")
-async def connect_google_calendar(request: Request):
-    # Trigger the SDK's login flow but pin the federated connection and
-    # request the Calendar/Gmail scopes at the upstream IdP.
-    from urllib.parse import urlencode
-
-    params = {
-        "connection": "google-oauth2",
-        "connection_scope": " ".join(GOOGLE_CONNECTION_SCOPES),
-    }
-    return RedirectResponse(url=f"/auth/login?{urlencode(params)}")
-
-
-@app.get("/profile")
-async def profile(request: Request, response: Response):
-    user = await _get_user(request, response)
-    if not user:
-        return RedirectResponse(url="/auth/login")
-    session = await _get_session(request, response) or {}
-    access_token, _ = _tokens_from_session(session)
-    access_token_kind = classify_token(access_token)
-    access_token_header = decode_jwt_header(access_token) if access_token else {}
-    access_token_claims = (
-        decode_jwt_claims(access_token) if access_token_kind == "jws" else {}
-    )
-
-    return templates.TemplateResponse(
-        request=request,
-        name="profile.html",
-        context={
-            "user": user,
-            "id_token_claims": user,
-            "id_token_claims_pretty": json.dumps(user, indent=2, default=str),
-            "access_token": access_token,
-            "access_token_kind": access_token_kind,
-            "access_token_header": access_token_header,
-            "access_token_header_pretty": json.dumps(
-                access_token_header, indent=2, default=str
-            ),
-            "access_token_claims": access_token_claims,
-            "access_token_claims_pretty": json.dumps(
-                access_token_claims, indent=2, default=str
-            ),
-        },
-    )
-
-
-@app.get("/chat")
-async def chat_page(request: Request, response: Response):
-    user = await _get_user(request, response)
-    if not user:
-        return RedirectResponse(url="/auth/login")
-    messages = request.session.get("conversation", [])
-    return templates.TemplateResponse(
-        request=request, name="chat.html", context={"user": user, "messages": messages}
-    )
-
-
-# ---------- chat ----------
-
-
-async def dispatch_tool(name: str, args: dict, refresh_token: str) -> str:
+async def dispatch_google_tool(name: str, args: dict, refresh_token: str) -> str:
+    schema_fn = GOOGLE_TOOLS_BY_NAME.get(name)
+    if not schema_fn:
+        return None  # signal "not a Google tool"
+    _, fn = schema_fn
     if name == "list_upcoming_calendar_events":
-        return await list_upcoming_calendar_events(
+        return await fn(
             refresh_token=refresh_token,
             days=int(args.get("days", 7)),
             max_results=int(args.get("max_results", 5)),
         )
     if name == "create_calendar_event":
-        return await create_calendar_event(
+        return await fn(
             refresh_token=refresh_token,
             summary=args["summary"],
             start=args["start"],
@@ -324,24 +282,328 @@ async def dispatch_tool(name: str, args: dict, refresh_token: str) -> str:
             attendees=args.get("attendees") or None,
         )
     if name == "list_recent_emails":
-        return await list_recent_emails(
+        return await fn(
             refresh_token=refresh_token,
             max_results=int(args.get("max_results", 5)),
             query=args.get("query", ""),
         )
-    return json.dumps({"error": f"Unknown tool: {name}"})
+    return None
 
 
-GOOGLE_TOOL_SCHEMAS = [
-    CALENDAR_TOOL_SCHEMA,
-    CREATE_CALENDAR_EVENT_TOOL_SCHEMA,
-    GMAIL_LIST_TOOL_SCHEMA,
-]
+# ---------- pages ----------
+
+
+@app.get("/")
+async def home(request: Request, response: Response):
+    user = await _get_user(request, response)
+    if user:
+        return RedirectResponse(url="/dashboard")
+    return templates.TemplateResponse(request=request, name="home.html")
+
+
+@app.get("/connect/google-calendar")
+async def connect_google_calendar(request: Request):
+    from urllib.parse import urlencode
+
+    params = {
+        "connection": "google-oauth2",
+        "connection_scope": " ".join(GOOGLE_CONNECTION_SCOPES),
+    }
+    return RedirectResponse(url=f"/auth/login?{urlencode(params)}")
+
+
+@app.get("/dashboard")
+async def dashboard(request: Request, response: Response):
+    user, session, ctx = await require_login(request, response)
+    if not user:
+        return RedirectResponse(url="/auth/login")
+
+    role = ctx["role"]
+    common = {"user": user, "ctx": ctx}
+
+    if role == "compass_admin":
+        companies = get_companies()
+        all_trips = get_trips()
+        all_customers = get_customers()
+        kpi = {
+            "companies": len(companies),
+            "customers": len(all_customers),
+            "trips": len(all_trips),
+            "trips_completed": sum(1 for t in all_trips if t["status"] == "completed"),
+            "total_spent": sum(c["spent"] for c in companies),
+        }
+        return templates.TemplateResponse(
+            request=request,
+            name="dashboard.html",
+            context={**common, "companies": companies, "kpi": kpi},
+        )
+
+    if role == "travel_agent":
+        org = ctx.get("org_name")
+        my_company = get_company(org_name=org) if org else None
+        trips = get_trips(org_name=org) if org else []
+        customers = get_customers(org_name=org) if org else []
+        customer_names = {c["id"]: c["name"] for c in customers}
+        trips_sorted = sorted(trips, key=lambda t: t["depart_date"], reverse=True)
+        return templates.TemplateResponse(
+            request=request,
+            name="dashboard.html",
+            context={
+                **common,
+                "my_company": my_company,
+                "trips": trips_sorted,
+                "kpi": {"customers": len(customers)},
+                "customer_names": customer_names,
+            },
+        )
+
+    if role == "customer":
+        customer_id = ctx.get("customer_id")
+        org = ctx.get("org_name")
+        my_company = get_company(org_name=org) if org else None
+        trips = sorted(
+            get_trips(customer_id=customer_id) if customer_id else [],
+            key=lambda t: t["depart_date"],
+            reverse=True,
+        )
+        return templates.TemplateResponse(
+            request=request,
+            name="dashboard.html",
+            context={**common, "my_company": my_company, "trips": trips, "kpi": {"my_trips": len(trips)}},
+        )
+
+    # role == "unknown"
+    return templates.TemplateResponse(
+        request=request, name="dashboard.html", context=common
+    )
+
+
+@app.get("/companies")
+async def companies_page(request: Request, response: Response):
+    user, _, ctx = await require_login(request, response)
+    if not user:
+        return RedirectResponse(url="/auth/login")
+    if not has_permission(ctx, "read:all_companies"):
+        return RedirectResponse(url="/dashboard")
+    companies = get_companies()
+    counts = {
+        "customers": {c["org_name"]: len(get_customers(org_name=c["org_name"])) for c in companies},
+        "trips": {c["org_name"]: len(get_trips(org_name=c["org_name"])) for c in companies},
+    }
+    return templates.TemplateResponse(
+        request=request,
+        name="companies.html",
+        context={"user": user, "ctx": ctx, "companies": companies, "counts": counts},
+    )
+
+
+@app.get("/companies/{company_id}")
+async def company_detail(request: Request, response: Response, company_id: str):
+    user, _, ctx = await require_login(request, response)
+    if not user:
+        return RedirectResponse(url="/auth/login")
+    company = get_company(company_id=company_id)
+    if not company:
+        return RedirectResponse(url="/companies" if has_permission(ctx, "read:all_companies") else "/dashboard")
+
+    if has_permission(ctx, "read:all_companies"):
+        pass  # admin sees all
+    elif has_permission(ctx, "read:my_company") and company["org_name"] == ctx.get("org_name"):
+        pass  # agent / customer sees own company
+    else:
+        return RedirectResponse(url="/dashboard")
+
+    customers = get_customers(org_name=company["org_name"])
+    agents = get_agents(org_name=company["org_name"])
+    trips = get_trips(org_name=company["org_name"])
+    customer_names = {c["id"]: c["name"] for c in customers}
+    agent_names = {a["id"]: a["name"] for a in agents}
+    return templates.TemplateResponse(
+        request=request,
+        name="company_detail.html",
+        context={
+            "user": user,
+            "ctx": ctx,
+            "company": company,
+            "customers": customers,
+            "agents": agents,
+            "trips": trips,
+            "customer_names": customer_names,
+            "agent_names": agent_names,
+        },
+    )
+
+
+@app.get("/customers")
+async def customers_page(request: Request, response: Response):
+    user, _, ctx = await require_login(request, response)
+    if not user:
+        return RedirectResponse(url="/auth/login")
+    if not has_any_permission(ctx, "read:all_customers", "read:my_customers"):
+        return RedirectResponse(url="/dashboard")
+
+    if has_permission(ctx, "read:all_customers"):
+        customers = get_customers()
+        scope_label = "all companies"
+    else:
+        customers = get_customers(org_name=ctx.get("org_name"))
+        scope_label = ctx.get("org_name") or "your organization"
+
+    company_names = {c["org_name"]: c["display_name"] for c in get_companies()}
+    agent_names = {a["id"]: a["name"] for a in TRAVEL_AGENTS}
+    trip_counts: dict[str, int] = {}
+    for t in TRIPS:
+        trip_counts[t["customer_id"]] = trip_counts.get(t["customer_id"], 0) + 1
+
+    return templates.TemplateResponse(
+        request=request,
+        name="customers.html",
+        context={
+            "user": user,
+            "ctx": ctx,
+            "customers": customers,
+            "company_names": company_names,
+            "agent_names": agent_names,
+            "trip_counts": trip_counts,
+            "scope_label": scope_label,
+        },
+    )
+
+
+@app.get("/trips")
+async def trips_page(request: Request, response: Response):
+    user, _, ctx = await require_login(request, response)
+    if not user:
+        return RedirectResponse(url="/auth/login")
+
+    if has_permission(ctx, "read:all_trips"):
+        trips = get_trips()
+        scope_label = "all companies"
+    elif has_permission(ctx, "read:company_trips") and ctx.get("org_name"):
+        trips = get_trips(org_name=ctx["org_name"])
+        scope_label = ctx["org_name"]
+    elif has_permission(ctx, "read:my_trips") and ctx.get("customer_id"):
+        trips = get_trips(customer_id=ctx["customer_id"])
+        scope_label = "your bookings"
+    else:
+        return RedirectResponse(url="/dashboard")
+
+    customer_names = {c["id"]: c["name"] for c in get_customers()}
+    return templates.TemplateResponse(
+        request=request,
+        name="trips.html",
+        context={
+            "user": user,
+            "ctx": ctx,
+            "trips": sorted(trips, key=lambda t: t["depart_date"], reverse=True),
+            "customer_names": customer_names,
+            "scope_label": scope_label,
+        },
+    )
+
+
+@app.get("/trips/{trip_id}")
+async def trip_detail(request: Request, response: Response, trip_id: str):
+    user, _, ctx = await require_login(request, response)
+    if not user:
+        return RedirectResponse(url="/auth/login")
+    trip = get_trip(trip_id)
+    if not trip:
+        return RedirectResponse(url="/trips")
+    customer = get_customer(trip["customer_id"])
+    company = get_company(org_name=customer["org_name"]) if customer else None
+
+    if has_permission(ctx, "read:all_trips"):
+        pass
+    elif has_permission(ctx, "read:company_trips") and customer and customer["org_name"] == ctx.get("org_name"):
+        pass
+    elif has_permission(ctx, "read:my_trips") and trip["customer_id"] == ctx.get("customer_id"):
+        pass
+    else:
+        return RedirectResponse(url="/dashboard")
+
+    return templates.TemplateResponse(
+        request=request,
+        name="trip_detail.html",
+        context={
+            "user": user,
+            "ctx": ctx,
+            "trip": trip,
+            "customer": customer,
+            "company": company,
+            "experiences": get_experiences_for_trip(trip_id),
+        },
+    )
+
+
+@app.get("/profile")
+async def profile(request: Request, response: Response):
+    user, session, ctx = await require_login(request, response)
+    if not user:
+        return RedirectResponse(url="/auth/login")
+    access_token, _ = _tokens_from_session(session)
+    access_token_kind = classify_token(access_token)
+    access_token_header = decode_jwt_header(access_token) if access_token else {}
+    access_token_claims = (
+        decode_jwt_claims(access_token) if access_token_kind == "jws" else {}
+    )
+    return templates.TemplateResponse(
+        request=request,
+        name="profile.html",
+        context={
+            "user": user,
+            "ctx": ctx,
+            "id_token_claims": user,
+            "id_token_claims_pretty": json.dumps(user, indent=2, default=str),
+            "access_token": access_token,
+            "access_token_kind": access_token_kind,
+            "access_token_header": access_token_header,
+            "access_token_header_pretty": json.dumps(access_token_header, indent=2, default=str),
+            "access_token_claims": access_token_claims,
+            "access_token_claims_pretty": json.dumps(access_token_claims, indent=2, default=str),
+        },
+    )
+
+
+# ---------- chat ----------
+
+
+@app.get("/chat")
+async def chat_page(request: Request, response: Response):
+    user, session, ctx = await require_login(request, response)
+    if not user:
+        return RedirectResponse(url="/auth/login")
+    messages = request.session.get("conversation", [])
+    visible_tools = [s["function"]["name"] for s in cz_visible_schemas(ctx)] + [
+        s["function"]["name"] for s in visible_google_schemas(ctx)
+    ]
+    return templates.TemplateResponse(
+        request=request,
+        name="chat.html",
+        context={"user": user, "ctx": ctx, "messages": messages, "visible_tools": visible_tools},
+    )
+
+
+async def dispatch_any_tool(name: str, args: dict, ctx: dict, refresh_token: str) -> str:
+    if name in CZ_TOOLS:
+        return await cz_dispatch(name, args, ctx)
+    if name in GOOGLE_TOOLS_BY_NAME:
+        if not has_permission(ctx, GOOGLE_TOOL_REQUIRED):
+            return json.dumps(
+                {"error": f"permission denied — Google tools need {GOOGLE_TOOL_REQUIRED}"}
+            )
+        try:
+            return await dispatch_google_tool(name, args, refresh_token)
+        except TokenVaultError as e:
+            return json.dumps({"error": str(e)})
+        except Exception as e:
+            return json.dumps({"error": f"{type(e).__name__}: {e}"})
+    return json.dumps({"error": f"unknown tool: {name}"})
 
 
 @app.post("/chat/stream")
 async def chat_stream(request: Request, response: Response):
-    user = await _get_user(request, response)
+    user, session, ctx = await require_login(request, response)
     if not user:
         return JSONResponse({"error": "unauthorized"}, status_code=401)
 
@@ -350,12 +612,13 @@ async def chat_stream(request: Request, response: Response):
     if not user_message:
         return JSONResponse({"error": "empty message"}, status_code=400)
 
-    session = await _get_session(request, response) or {}
     access_token, refresh_token = _tokens_from_session(session)
     conversation = request.session.get("conversation", [])
 
+    tool_schemas = cz_visible_schemas(ctx) + visible_google_schemas(ctx)
+
     messages = (
-        [{"role": "system", "content": build_system_prompt(user, access_token)}]
+        [{"role": "system", "content": build_system_prompt(user, ctx)}]
         + conversation
         + [{"role": "user", "content": user_message}]
     )
@@ -363,12 +626,10 @@ async def chat_stream(request: Request, response: Response):
     async def generate():
         try:
             for _ in range(MAX_TOOL_ITERATIONS):
-                stream = await openai_client.chat.completions.create(
-                    model=LLM_MODEL,
-                    messages=messages,
-                    tools=GOOGLE_TOOL_SCHEMAS,
-                    stream=True,
-                )
+                kwargs = {"model": LLM_MODEL, "messages": messages, "stream": True}
+                if tool_schemas:
+                    kwargs["tools"] = tool_schemas
+                stream = await openai_client.chat.completions.create(**kwargs)
 
                 content_acc = ""
                 tool_calls_acc: dict[int, dict] = {}
@@ -415,13 +676,7 @@ async def chat_stream(request: Request, response: Response):
                         args = json.loads(tc["arguments"]) if tc["arguments"] else {}
                     except json.JSONDecodeError:
                         args = {}
-                    try:
-                        result = await dispatch_tool(tc["name"], args, refresh_token)
-                    except TokenVaultError as e:
-                        result = json.dumps({"error": str(e)})
-                    except Exception as e:
-                        print(f"Tool error: {type(e).__name__}: {e}")
-                        result = json.dumps({"error": f"{type(e).__name__}: {e}"})
+                    result = await dispatch_any_tool(tc["name"], args, ctx, refresh_token)
                     messages.append(
                         {"role": "tool", "tool_call_id": tc["id"], "content": result}
                     )
@@ -439,13 +694,11 @@ async def chat_save(request: Request, response: Response):
     user = await _get_user(request, response)
     if not user:
         return JSONResponse({"error": "unauthorized"}, status_code=401)
-
     body = await request.json()
     user_msg = (body.get("user") or "").strip()
     assistant_msg = (body.get("assistant") or "").strip()
     if not user_msg or not assistant_msg:
         return JSONResponse({"error": "missing fields"}, status_code=400)
-
     conversation = request.session.get("conversation", [])
     conversation.append({"role": "user", "content": user_msg})
     conversation.append({"role": "assistant", "content": assistant_msg})
@@ -458,11 +711,9 @@ async def chat_save(request: Request, response: Response):
 
 @app.get("/connections")
 async def connections_page(request: Request, response: Response):
-    user = await _get_user(request, response)
+    user, session, ctx = await require_login(request, response)
     if not user:
         return RedirectResponse(url="/auth/login")
-    session = await _get_session(request, response) or {}
-
     accounts: list[dict] = []
     error: str | None = None
     _, refresh_token = _tokens_from_session(session)
@@ -471,12 +722,12 @@ async def connections_page(request: Request, response: Response):
         accounts = await list_accounts(token)
     except MyAccountError as e:
         error = str(e)
-
     return templates.TemplateResponse(
         request=request,
         name="connections.html",
         context={
             "user": user,
+            "ctx": ctx,
             "accounts": accounts,
             "error": request.query_params.get("error") or error,
             "success": request.query_params.get("success"),
@@ -486,10 +737,9 @@ async def connections_page(request: Request, response: Response):
 
 @app.post("/connections/connect/{connection}")
 async def connections_connect(request: Request, response: Response, connection: str):
-    user = await _get_user(request, response)
+    user, session, ctx = await require_login(request, response)
     if not user:
         return RedirectResponse(url="/auth/login")
-    session = await _get_session(request, response) or {}
     _, refresh_token = _tokens_from_session(session)
 
     redirect_uri = str(request.url_for("connections_callback"))
@@ -522,7 +772,6 @@ async def connections_connect(request: Request, response: Response, connection: 
         "redirect_uri": redirect_uri,
         "connection": connection,
     }
-
     ticket = (result.get("connect_params") or {}).get("ticket")
     connect_uri = result.get("connect_uri")
     return RedirectResponse(url=f"{connect_uri}?ticket={ticket}", status_code=303)
@@ -540,19 +789,16 @@ async def connections_complete(request: Request, response: Response):
     user = await _get_user(request, response)
     if not user:
         return JSONResponse({"error": "unauthorized"}, status_code=401)
-
     body = await request.json()
     connect_code = (body.get("connect_code") or "").strip()
     state = (body.get("state") or "").strip()
     if not connect_code:
         return JSONResponse({"error": "missing connect_code"}, status_code=400)
-
     pending = request.session.get("pending_connect") or {}
     if not pending:
         return JSONResponse({"error": "no pending connect in session"}, status_code=400)
     if state and pending.get("state") and state != pending["state"]:
         return JSONResponse({"error": "state mismatch"}, status_code=400)
-
     session = await _get_session(request, response) or {}
     _, refresh_token = _tokens_from_session(session)
     try:
@@ -566,7 +812,6 @@ async def connections_complete(request: Request, response: Response):
     except MyAccountError as e:
         request.session.pop("pending_connect", None)
         return JSONResponse({"error": str(e)}, status_code=400)
-
     request.session.pop("pending_connect", None)
     return JSONResponse({"ok": True})
 
@@ -580,7 +825,6 @@ async def connections_disconnect(
         return RedirectResponse(url="/auth/login")
     session = await _get_session(request, response) or {}
     _, refresh_token = _tokens_from_session(session)
-
     try:
         token = await mint_my_account_token(refresh_token)
         await delete_account(token, account_id)
@@ -590,5 +834,4 @@ async def connections_disconnect(
         return RedirectResponse(
             url=f"/connections?error={quote_plus(str(e))}", status_code=303
         )
-
     return RedirectResponse(url="/connections?success=disconnected", status_code=303)

@@ -1,103 +1,84 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Profile — AI Assistant</title>
-    <link rel="stylesheet" href="/static/style.css">
-</head>
-<body>
-    <div class="container profile">
-        <header>
-            <div class="user-info">
-                {% if user.picture %}
-                <img src="{{ user.picture }}" alt="Avatar" class="avatar">
-                {% endif %}
-                <span>{{ user.name or user.email }}</span>
-            </div>
-            <div class="nav-links">
-                <a href="/chat" class="btn btn-small">Chat</a>
-                <a href="/connections" class="btn btn-small">Connections</a>
-                <a href="/auth/logout" class="btn btn-small">Logout</a>
-            </div>
-        </header>
+{% extends "base.html" %}
+{% set active = 'profile' %}
+{% block title %}Profile — CompassZero{% endblock %}
 
-        <h2>User Profile</h2>
+{% block content %}
+<div class="page-header">
+    <h1>Profile</h1>
+    <span class="muted">Tokens this session is using</span>
+</div>
 
-        <section class="token-section">
-            <h3>ID Token Claims</h3>
-            <table class="claims-table">
-                {% for key, value in id_token_claims.items() %}
-                <tr>
-                    <td class="claim-key">{{ key }}</td>
-                    <td class="claim-value">{{ value }}</td>
-                </tr>
-                {% endfor %}
-            </table>
-        </section>
+<div class="card-grid">
+    <div class="kpi"><div class="kpi-label">Role</div><div class="kpi-value" style="font-size:1.2rem">{{ ctx.role|replace('_',' ')|title }}</div></div>
+    <div class="kpi"><div class="kpi-label">Organization</div><div class="kpi-value" style="font-size:1.2rem">{{ ctx.org_name or '—' }}</div></div>
+    <div class="kpi"><div class="kpi-label">Permissions</div><div class="kpi-value" style="font-size:1.05rem">{{ ctx.permissions|length }}</div></div>
+</div>
 
-        <section class="token-section">
-            <h3>ID Token (Raw Claims)</h3>
-            <pre class="token-raw">{{ id_token_claims_pretty }}</pre>
-        </section>
+<section class="token-section">
+    <h3>Permissions (from access token)</h3>
+    {% if ctx.permissions %}
+    <ul style="margin: 0 0 0 1.25rem;">
+        {% for p in ctx.permissions|sort %}<li><code>{{ p }}</code></li>{% endfor %}
+    </ul>
+    {% else %}
+    <p class="muted">No permissions on this token. Check that RBAC is enabled on the CompassZero API and that this user has a role assigned.</p>
+    {% endif %}
+</section>
 
-        <section class="token-section">
-            <h3>Access Token Claims</h3>
-            {% if access_token_kind == "jws" and access_token_claims %}
-            <table class="claims-table">
-                {% for key, value in access_token_claims.items() %}
-                <tr>
-                    <td class="claim-key">{{ key }}</td>
-                    <td class="claim-value">{{ value }}</td>
-                </tr>
-                {% endfor %}
-            </table>
-            {% elif access_token_kind == "jwe" %}
-            <p class="muted">
-                This access token is <strong>JWE-encrypted</strong>
-                ({{ access_token_header.alg or "?" }} / {{ access_token_header.enc or "?" }}).
-                The payload can only be decrypted with Auth0's tenant key,
-                which intentionally isn't shared with the application — so
-                inner claims aren't viewable client-side. The token is still
-                valid; the chat, calendar, gmail and connected-accounts
-                features all use it correctly. For decoded user claims, see
-                the <strong>ID Token Claims</strong> section above.
-            </p>
-            {% elif access_token_kind == "opaque" %}
-            <p class="muted">
-                Access token is <strong>opaque</strong> (no audience requested
-                at login, or audience is an Auth0 internal API). To get a
-                signed JWT with viewable claims, set <code>AUTH0_AUDIENCE</code>
-                in <code>.env</code> to the Identifier of a custom Auth0 API
-                you've created, then log out and log back in.
-            </p>
-            {% else %}
-            <p class="muted">No access token available.</p>
-            {% endif %}
-        </section>
+<section class="token-section">
+    <h3>ID Token Claims</h3>
+    <table class="claims-table">
+        {% for key, value in id_token_claims.items() %}
+        <tr>
+            <td class="claim-key">{{ key }}</td>
+            <td class="claim-value">{{ value }}</td>
+        </tr>
+        {% endfor %}
+    </table>
+</section>
 
-        {% if access_token_kind in ("jws", "jwe") %}
-        <section class="token-section">
-            <h3>Access Token Header</h3>
-            <pre class="token-raw">{{ access_token_header_pretty }}</pre>
-        </section>
-        {% endif %}
+<section class="token-section">
+    <h3>Access Token Claims</h3>
+    {% if access_token_kind == "jws" and access_token_claims %}
+    <table class="claims-table">
+        {% for key, value in access_token_claims.items() %}
+        <tr>
+            <td class="claim-key">{{ key }}</td>
+            <td class="claim-value">{{ value }}</td>
+        </tr>
+        {% endfor %}
+    </table>
+    {% elif access_token_kind == "jwe" %}
+    <p class="muted">
+        This access token is <strong>JWE-encrypted</strong>
+        ({{ access_token_header.alg or "?" }} / {{ access_token_header.enc or "?" }}).
+        The payload can only be decrypted with Auth0's tenant key,
+        which intentionally isn't shared with the application — so
+        inner claims aren't viewable client-side. App functionality is
+        unaffected.
+    </p>
+    {% elif access_token_kind == "opaque" %}
+    <p class="muted">
+        Access token is <strong>opaque</strong>. Set <code>AUTH0_AUDIENCE=https://compasszero.api</code> in <code>.env</code> to get a signed JWT with viewable claims.
+    </p>
+    {% else %}
+    <p class="muted">No access token available.</p>
+    {% endif %}
+</section>
 
-        <section class="token-section">
-            <h3>Access Token (Raw)</h3>
-            {% if access_token %}
-            <pre class="token-raw">{{ access_token }}</pre>
-            {% else %}
-            <p class="muted">No access token available.</p>
-            {% endif %}
-        </section>
+{% if access_token_kind in ("jws", "jwe") %}
+<section class="token-section">
+    <h3>Access Token Header</h3>
+    <pre class="token-raw">{{ access_token_header_pretty }}</pre>
+</section>
+{% endif %}
 
-        {% if access_token_kind == "jws" and access_token_claims %}
-        <section class="token-section">
-            <h3>Access Token Claims (JSON)</h3>
-            <pre class="token-raw">{{ access_token_claims_pretty }}</pre>
-        </section>
-        {% endif %}
-    </div>
-</body>
-</html>
+<section class="token-section">
+    <h3>Access Token (Raw)</h3>
+    {% if access_token %}
+    <pre class="token-raw">{{ access_token }}</pre>
+    {% else %}
+    <p class="muted">No access token available.</p>
+    {% endif %}
+</section>
+{% endblock %}

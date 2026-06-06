@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+{% set active = 'trips' %}
+{% block title %}Trip {{ trip.id }} — CompassZero{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>Trip {{ trip.id }}</h1>
+    <span class="status-badge {{ trip.status }}">{{ trip.status }}</span>
+</div>
+
+<div class="detail-grid">
+    <div class="field"><div class="field-label">Type</div><div class="field-value">{{ trip.type|title }}</div></div>
+    <div class="field"><div class="field-label">Cost</div><div class="field-value">{{ trip.currency }} {{ '{:,.2f}'.format(trip.cost) }}</div></div>
+    <div class="field"><div class="field-label">From</div><div class="field-value">{{ trip.origin }}</div></div>
+    <div class="field"><div class="field-label">To</div><div class="field-value">{{ trip.destination }}</div></div>
+    <div class="field"><div class="field-label">Departure</div><div class="field-value">{{ trip.depart_date }}</div></div>
+    <div class="field"><div class="field-label">Return</div><div class="field-value">{{ trip.return_date }}</div></div>
+    <div class="field"><div class="field-label">Customer</div><div class="field-value">{{ customer.name if customer else trip.customer_id }} <code>{{ trip.customer_id }}</code></div></div>
+    <div class="field"><div class="field-label">Company</div><div class="field-value">{{ company.display_name if company else trip.customer_id }}</div></div>
+</div>
+
+<div class="card">
+    <h2>Experiences</h2>
+    {% if experiences %}
+    <table>
+        <thead><tr><th>Name</th><th>Date</th><th>Location</th><th>Cost</th></tr></thead>
+        <tbody>
+        {% for e in experiences %}
+            <tr>
+                <td>{{ e.name }}</td>
+                <td>{{ e.date }}</td>
+                <td>{{ e.location }}</td>
+                <td>{{ '{:,.0f}'.format(e.cost) }}</td>
+            </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <p class="muted">No experiences booked for this trip yet.</p>
+    {% endif %}
+</div>
+{% endblock %}

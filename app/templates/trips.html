@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% set active = 'trips' %}
+{% block title %}Trips — CompassZero{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>Trips</h1>
+    <span class="muted">{{ trips|length }} total{% if scope_label %} · {{ scope_label }}{% endif %}</span>
+</div>
+
+<div class="card">
+    {% if trips %}
+    <table>
+        <thead><tr><th>Trip</th><th>Type</th><th>Customer</th><th>Route</th><th>Dates</th><th>Cost</th><th>Status</th></tr></thead>
+        <tbody>
+        {% for t in trips %}
+            <tr>
+                <td><a href="/trips/{{ t.id }}"><code>{{ t.id }}</code></a></td>
+                <td>{{ t.type }}</td>
+                <td>{{ customer_names.get(t.customer_id, t.customer_id) }}</td>
+                <td>{{ t.origin }} → {{ t.destination }}</td>
+                <td>{{ t.depart_date }} – {{ t.return_date }}</td>
+                <td>{{ t.currency }} {{ '{:,.0f}'.format(t.cost) }}</td>
+                <td><span class="status-badge {{ t.status }}">{{ t.status }}</span></td>
+            </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <p class="muted">No trips in scope.</p>
+    {% endif %}
+</div>
+{% endblock %}

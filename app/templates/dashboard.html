@@ -1,0 +1,153 @@
+{% extends "base.html" %}
+{% set active = 'dashboard' %}
+{% block title %}Dashboard — CompassZero{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>Welcome back, {{ user.given_name or user.name or user.email }}</h1>
+    <span class="muted">{{ ctx.role|replace('_',' ')|title }}{% if ctx.org_name %} · {{ ctx.org_name }}{% endif %}</span>
+</div>
+
+{% if ctx.role == 'compass_admin' %}
+
+<div class="card-grid">
+    <div class="kpi">
+        <div class="kpi-label">Companies</div>
+        <div class="kpi-value">{{ kpi.companies }}</div>
+    </div>
+    <div class="kpi">
+        <div class="kpi-label">Customers</div>
+        <div class="kpi-value">{{ kpi.customers }}</div>
+    </div>
+    <div class="kpi">
+        <div class="kpi-label">Trips booked</div>
+        <div class="kpi-value">{{ kpi.trips }}</div>
+        <div class="kpi-meta">{{ kpi.trips_completed }} completed</div>
+    </div>
+    <div class="kpi">
+        <div class="kpi-label">Total spend</div>
+        <div class="kpi-value">${{ '{:,.0f}'.format(kpi.total_spent) }}</div>
+        <div class="kpi-meta">across all companies</div>
+    </div>
+</div>
+
+<div class="card">
+    <h2>Companies</h2>
+    <table>
+        <thead><tr><th>Company</th><th>Org slug</th><th>Budget</th><th>Spent</th><th></th></tr></thead>
+        <tbody>
+        {% for c in companies %}
+            <tr>
+                <td><a href="/companies/{{ c.id }}">{{ c.display_name }}</a></td>
+                <td><code>{{ c.org_name }}</code></td>
+                <td>{{ c.currency }} {{ '{:,.0f}'.format(c.budget) }}</td>
+                <td>{{ c.currency }} {{ '{:,.0f}'.format(c.spent) }}
+                    <div class="bar">
+                        {% set pct = (c.spent / c.budget * 100) if c.budget else 0 %}
+                        <div class="bar-fill {% if pct > 100 %}over{% elif pct > 80 %}warning{% endif %}" style="width: {{ [pct, 100]|min }}%"></div>
+                    </div>
+                </td>
+                <td><a class="btn btn-small btn-secondary" href="/companies/{{ c.id }}">View</a></td>
+            </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+</div>
+
+{% elif ctx.role == 'travel_agent' %}
+
+{% if my_company %}
+<div class="card-grid">
+    <div class="kpi">
+        <div class="kpi-label">Your company</div>
+        <div class="kpi-value" style="font-size:1.2rem">{{ my_company.display_name }}</div>
+        <div class="kpi-meta"><code>{{ my_company.org_name }}</code></div>
+    </div>
+    <div class="kpi">
+        <div class="kpi-label">Annual budget</div>
+        <div class="kpi-value">{{ my_company.currency }} {{ '{:,.0f}'.format(my_company.budget) }}</div>
+    </div>
+    <div class="kpi">
+        <div class="kpi-label">Spent</div>
+        {% set pct = (my_company.spent / my_company.budget * 100) if my_company.budget else 0 %}
+        <div class="kpi-value">{{ my_company.currency }} {{ '{:,.0f}'.format(my_company.spent) }}</div>
+        <div class="kpi-meta">{{ '%.1f' % pct }}% of budget</div>
+        <div class="bar">
+            <div class="bar-fill {% if pct > 100 %}over{% elif pct > 80 %}warning{% endif %}" style="width: {{ [pct, 100]|min }}%"></div>
+        </div>
+    </div>
+    <div class="kpi">
+        <div class="kpi-label">Customers under your org</div>
+        <div class="kpi-value">{{ kpi.customers }}</div>
+    </div>
+</div>
+{% endif %}
+
+<div class="card">
+    <h2>Recent bookings</h2>
+    {% if trips %}
+    <table>
+        <thead><tr><th>Trip</th><th>Customer</th><th>Route</th><th>Dates</th><th>Cost</th><th>Status</th></tr></thead>
+        <tbody>
+        {% for t in trips[:8] %}
+            <tr>
+                <td><a href="/trips/{{ t.id }}"><code>{{ t.id }}</code></a> · {{ t.type }}</td>
+                <td>{{ customer_names.get(t.customer_id, t.customer_id) }}</td>
+                <td>{{ t.origin }} → {{ t.destination }}</td>
+                <td>{{ t.depart_date }} – {{ t.return_date }}</td>
+                <td>{{ t.currency }} {{ '{:,.0f}'.format(t.cost) }}</td>
+                <td><span class="status-badge {{ t.status }}">{{ t.status }}</span></td>
+            </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <p class="muted">No bookings yet. Use the AI assistant to book a trip.</p>
+    {% endif %}
+</div>
+
+{% elif ctx.role == 'customer' %}
+
+{% if my_company %}
+<div class="card-grid">
+    <div class="kpi">
+        <div class="kpi-label">Your employer</div>
+        <div class="kpi-value" style="font-size:1.2rem">{{ my_company.display_name }}</div>
+    </div>
+    <div class="kpi">
+        <div class="kpi-label">Trips booked for you</div>
+        <div class="kpi-value">{{ kpi.my_trips }}</div>
+    </div>
+</div>
+{% endif %}
+
+<div class="card">
+    <h2>Your trips</h2>
+    {% if trips %}
+    <table>
+        <thead><tr><th>Trip</th><th>Route</th><th>Dates</th><th>Cost</th><th>Status</th></tr></thead>
+        <tbody>
+        {% for t in trips %}
+            <tr>
+                <td><a href="/trips/{{ t.id }}"><code>{{ t.id }}</code></a> · {{ t.type }}</td>
+                <td>{{ t.origin }} → {{ t.destination }}</td>
+                <td>{{ t.depart_date }} – {{ t.return_date }}</td>
+                <td>{{ t.currency }} {{ '{:,.0f}'.format(t.cost) }}</td>
+                <td><span class="status-badge {{ t.status }}">{{ t.status }}</span></td>
+            </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <p class="muted">No trips on file. Reach out to your travel agent to get booked.</p>
+    {% endif %}
+</div>
+
+{% else %}
+
+<div class="alert alert-info">
+    <strong>Account not yet provisioned.</strong> Your Auth0 user has no role assigned, so we don't know which CompassZero view to show you. Ask your CompassZero administrator to assign you to a role.
+</div>
+
+{% endif %}
+{% endblock %}

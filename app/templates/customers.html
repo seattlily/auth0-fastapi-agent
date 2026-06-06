@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% set active = 'customers' %}
+{% block title %}Customers — CompassZero{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>Customers</h1>
+    <span class="muted">{{ customers|length }} total{% if scope_label %} · {{ scope_label }}{% endif %}</span>
+</div>
+
+<div class="card">
+    {% if customers %}
+    <table>
+        <thead><tr><th>ID</th><th>Name</th><th>Email</th><th>Company</th><th>Agent</th><th>Trips</th></tr></thead>
+        <tbody>
+        {% for c in customers %}
+            <tr>
+                <td><code>{{ c.id }}</code></td>
+                <td>{{ c.name }}</td>
+                <td>{{ c.email }}</td>
+                <td>{{ company_names.get(c.org_name, c.org_name) }}</td>
+                <td>{{ agent_names.get(c.agent_id, c.agent_id or '—') }}</td>
+                <td>{{ trip_counts.get(c.id, 0) }}</td>
+            </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <p class="muted">No customers in scope.</p>
+    {% endif %}
+</div>
+{% endblock %}

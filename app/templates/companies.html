@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% set active = 'companies' %}
+{% block title %}Companies — CompassZero{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>Companies</h1>
+    <span class="muted">{{ companies|length }} total</span>
+</div>
+
+<div class="card">
+    <table>
+        <thead><tr><th>Company</th><th>Org slug</th><th>Customers</th><th>Trips</th><th>Budget</th><th>Spent</th><th>Utilization</th></tr></thead>
+        <tbody>
+        {% for c in companies %}
+            <tr>
+                <td><a href="/companies/{{ c.id }}">{{ c.display_name }}</a></td>
+                <td><code>{{ c.org_name }}</code></td>
+                <td>{{ counts.customers.get(c.org_name, 0) }}</td>
+                <td>{{ counts.trips.get(c.org_name, 0) }}</td>
+                <td>{{ c.currency }} {{ '{:,.0f}'.format(c.budget) }}</td>
+                <td>{{ c.currency }} {{ '{:,.0f}'.format(c.spent) }}</td>
+                <td>
+                    {% set pct = (c.spent / c.budget * 100) if c.budget else 0 %}
+                    <strong>{{ '%.1f' % pct }}%</strong>
+                    <div class="bar">
+                        <div class="bar-fill {% if pct > 100 %}over{% elif pct > 80 %}warning{% endif %}" style="width: {{ [pct, 100]|min }}%"></div>
+                    </div>
+                </td>
+            </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endblock %}
