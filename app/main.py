@@ -157,6 +157,17 @@ async def _get_user(request: Request, response: Response) -> dict | None:
     )
 
 
+def _tokens_from_session(session: dict | None) -> tuple[str, str]:
+    """Return (access_token, refresh_token) from the SDK session. Both may
+    be empty strings. The auth0-fastapi SDK nests these inside token_sets;
+    for this template the first set is the one issued at login."""
+    token_sets = (session or {}).get("token_sets") or []
+    if not token_sets:
+        return "", ""
+    ts = token_sets[0]
+    return ts.get("access_token", "") or "", ts.get("refresh_token", "") or ""
+
+
 def decode_jwt_claims(token: str) -> dict:
     try:
         parts = (token or "").split(".")
@@ -250,8 +261,7 @@ async def profile(request: Request, response: Response):
     if not user:
         return RedirectResponse(url="/auth/login")
     session = await _get_session(request, response) or {}
-
-    access_token = session.get("access_token") or ""
+    access_token, _ = _tokens_from_session(session)
     access_token_kind = classify_token(access_token)
     access_token_header = decode_jwt_header(access_token) if access_token else {}
     access_token_claims = (
@@ -338,8 +348,7 @@ async def chat_stream(request: Request, response: Response):
         return JSONResponse({"error": "empty message"}, status_code=400)
 
     session = await _get_session(request, response) or {}
-    refresh_token = session.get("refresh_token") or ""
-    access_token = session.get("access_token") or ""
+    access_token, refresh_token = _tokens_from_session(session)
     conversation = request.session.get("conversation", [])
 
     messages = (
@@ -453,7 +462,7 @@ async def connections_page(request: Request, response: Response):
 
     accounts: list[dict] = []
     error: str | None = None
-    refresh_token = session.get("refresh_token") or ""
+    _, refresh_token = _tokens_from_session(session)
     try:
         token = await mint_my_account_token(refresh_token)
         accounts = await list_accounts(token)
@@ -478,7 +487,7 @@ async def connections_connect(request: Request, response: Response, connection: 
     if not user:
         return RedirectResponse(url="/auth/login")
     session = await _get_session(request, response) or {}
-    refresh_token = session.get("refresh_token") or ""
+    _, refresh_token = _tokens_from_session(session)
 
     redirect_uri = str(request.url_for("connections_callback"))
     state = secrets.token_urlsafe(24)
@@ -542,7 +551,7 @@ async def connections_complete(request: Request, response: Response):
         return JSONResponse({"error": "state mismatch"}, status_code=400)
 
     session = await _get_session(request, response) or {}
-    refresh_token = session.get("refresh_token") or ""
+    _, refresh_token = _tokens_from_session(session)
     try:
         token = await mint_my_account_token(refresh_token)
         await complete_connect(
@@ -567,7 +576,7 @@ async def connections_disconnect(
     if not user:
         return RedirectResponse(url="/auth/login")
     session = await _get_session(request, response) or {}
-    refresh_token = session.get("refresh_token") or ""
+    _, refresh_token = _tokens_from_session(session)
 
     try:
         token = await mint_my_account_token(refresh_token)
