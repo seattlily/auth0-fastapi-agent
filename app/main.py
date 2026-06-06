@@ -79,6 +79,51 @@ if os.environ.get("AUTH0_AUDIENCE"):
 
 auth0_config = Auth0Config(**_auth0_kwargs)
 auth_client = AuthClient(auth0_config)
+
+
+def _relax_cookies_for_local_http(client) -> None:
+    """The auth0-fastapi SDK marks its session and transaction cookies
+    as Secure by default. On plain http://localhost the browser drops
+    those cookies, and /auth/callback then fails with
+    `400 transaction is missing`. For local-dev convenience we relax
+    secure=False here. Set USE_SECURE_COOKIES=true (and serve over
+    HTTPS) before deploying anywhere else."""
+    import types
+
+    # State store: cookie_options is a public dict.
+    state_store = getattr(client, "_state_store", None)
+    if state_store is not None and hasattr(state_store, "cookie_options"):
+        state_store.cookie_options["secure"] = False
+        state_store.cookie_options["samesite"] = "lax"
+
+    # Transaction store: secure=True is hardcoded inside .set(); patch
+    # an instance method that mirrors the original but flips secure.
+    transaction_store = getattr(client, "_transaction_store", None)
+    if transaction_store is not None:
+
+        async def _set_no_secure(self, identifier, value, options=None):
+            if options is None or "response" not in options:
+                raise ValueError(
+                    "Response object is required in store options for cookie storage."
+                )
+            response = options["response"]
+            encrypted_value = self.encrypt(identifier, value.model_dump())
+            response.set_cookie(
+                key=self.cookie_name,
+                value=encrypted_value,
+                path="/",
+                samesite="lax",
+                secure=False,
+                httponly=True,
+                max_age=60,
+            )
+
+        transaction_store.set = types.MethodType(_set_no_secure, transaction_store)
+
+
+if os.environ.get("USE_SECURE_COOKIES", "").lower() not in ("1", "true", "yes"):
+    _relax_cookies_for_local_http(auth_client.client)
+
 app.state.config = auth0_config
 app.state.auth_client = auth_client
 register_auth_routes(auth_router, auth0_config)
