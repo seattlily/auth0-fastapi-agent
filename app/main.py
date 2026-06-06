@@ -159,13 +159,16 @@ async def _get_user(request: Request, response: Response) -> dict | None:
 
 def _tokens_from_session(session: dict | None) -> tuple[str, str]:
     """Return (access_token, refresh_token) from the SDK session. Both may
-    be empty strings. The auth0-fastapi SDK nests these inside token_sets;
-    for this template the first set is the one issued at login."""
-    token_sets = (session or {}).get("token_sets") or []
-    if not token_sets:
-        return "", ""
-    ts = token_sets[0]
-    return ts.get("access_token", "") or "", ts.get("refresh_token", "") or ""
+    be empty strings. The auth0-fastapi SDK puts the refresh_token at the
+    TOP level of the session dict, but nests access_token inside the first
+    entry of token_sets[]."""
+    s = session or {}
+    refresh_token = s.get("refresh_token") or ""
+    token_sets = s.get("token_sets") or []
+    access_token = ""
+    if token_sets:
+        access_token = token_sets[0].get("access_token", "") or ""
+    return access_token, refresh_token
 
 
 def decode_jwt_claims(token: str) -> dict:
