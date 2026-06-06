@@ -463,16 +463,6 @@ async def connections_page(request: Request, response: Response):
         return RedirectResponse(url="/auth/login")
     session = await _get_session(request, response) or {}
 
-    # Temporary debug: show what the SDK is actually putting in the session.
-    print(
-        "[/connections debug] session top-level keys:",
-        list(session.keys()),
-        "| token_sets count:",
-        len(session.get("token_sets") or []),
-        "| refresh_token present at top level:",
-        bool(session.get("refresh_token")),
-    )
-
     accounts: list[dict] = []
     error: str | None = None
     _, refresh_token = _tokens_from_session(session)
