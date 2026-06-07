@@ -14,10 +14,11 @@
             <a class="brand" href="/dashboard">Compass<span class="compass">Zero</span></a>
             <div class="nav-links">
                 <a href="/dashboard" {% if active=='dashboard' %}class="active"{% endif %}>Dashboard</a>
-                {% if 'read:all_companies' in (ctx.permissions or set()) %}
+                {% set perms = ctx.permissions or [] %}
+                {% if 'read:all_companies' in perms %}
                 <a href="/companies" {% if active=='companies' %}class="active"{% endif %}>Companies</a>
                 {% endif %}
-                {% if ('read:my_customers' in (ctx.permissions or set())) or ('read:all_customers' in (ctx.permissions or set())) %}
+                {% if 'read:my_customers' in perms or 'read:all_customers' in perms %}
                 <a href="/customers" {% if active=='customers' %}class="active"{% endif %}>Customers</a>
                 {% endif %}
                 <a href="/trips" {% if active=='trips' %}class="active"{% endif %}>Trips</a>
