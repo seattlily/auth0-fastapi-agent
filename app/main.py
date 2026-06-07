@@ -217,6 +217,17 @@ async def require_login(request: Request, response: Response) -> tuple[dict, dic
     access_token, _ = _tokens_from_session(session)
     access_claims = decode_jwt_claims(access_token)
     ctx = get_user_context(access_claims, user or {})
+
+    # Per-user app-state isolation: Starlette's SessionMiddleware cookie
+    # is independent of the SDK's session, so app state (conversation,
+    # pending_connect) survives a logout. Reset whenever the signed-in
+    # user changes.
+    sub = (user or {}).get("sub") or ""
+    if request.session.get("conversation_owner") != sub:
+        request.session["conversation_owner"] = sub
+        request.session["conversation"] = []
+        request.session.pop("pending_connect", None)
+
     return user, session, ctx
 
 
