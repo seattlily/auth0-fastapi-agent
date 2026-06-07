@@ -153,9 +153,10 @@ Auth0 dashboard → **User Management → Users → Create User**. Use Username-
 For each user:
 
 1. Set a password (note it for testing).
-2. Open the user → **Roles** tab → **Assign Roles** → pick the appropriate role.
+2. Open the user → **Roles** tab → **Assign Roles** → pick the appropriate role. *(For admin, this is enough — they don't log in via an org.)*
 3. Open the user → **Details** → click pencil next to **app_metadata** → paste the JSON (`{"agent_id": "ag_alex"}` etc.) → save.
 4. For the agents and customers (not the admin), open the relevant Organization → **Members** tab → **Add Members** → add this user.
+5. **Important — assign the role *again* at the org-member level:** still on the Organization → Members tab, click the user's row → in the member detail panel find **Roles** → **Assign Roles** → pick the same role. **Without this step, the user's `permissions` array on the access token will be empty when they log in via an org**, even though they have the user-level role.
 
 ---
 
