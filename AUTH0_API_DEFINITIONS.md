@@ -182,6 +182,14 @@ exports.onExecutePostLogin = async (event, api) => {
     api.accessToken.setCustomClaim(ns + "agent_id", meta.agent_id);
     api.idToken.setCustomClaim(ns + "agent_id", meta.agent_id);
   }
+
+  // Auth0 puts `org_id` on the token automatically when the user logs
+  // in via an Organization, but `org_name` isn't always present. Set
+  // it explicitly so the app can join on the slug.
+  if (event.organization && event.organization.name) {
+    api.accessToken.setCustomClaim(ns + "org_name", event.organization.name);
+    api.idToken.setCustomClaim(ns + "org_name", event.organization.name);
+  }
 };
 ```
 

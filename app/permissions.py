@@ -46,7 +46,12 @@ def get_user_context(access_token_claims: dict | None, id_token_claims: dict | N
         "permissions": perms,
         "role": role_for(perms),
         "org_id": at.get("org_id") or it.get("org_id"),
-        "org_name": at.get("org_name") or it.get("org_name"),
+        "org_name": (
+            at.get("org_name")
+            or it.get("org_name")
+            or at.get(NAMESPACE + "org_name")
+            or it.get(NAMESPACE + "org_name")
+        ),
         "customer_id": (
             it.get(NAMESPACE + "customer_id") or at.get(NAMESPACE + "customer_id")
         ),
