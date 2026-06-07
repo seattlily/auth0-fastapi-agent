@@ -248,10 +248,23 @@ def build_system_prompt(user: dict | None, ctx: dict) -> str:
         "platform. Your tools are filtered to match the signed-in user's "
         "Auth0 permissions, so only call what's available to you. Use the "
         "user profile below to personalize answers and decide which tool to "
-        "call. When booking on behalf of customers, always confirm key "
-        "details (dates, cost, customer_id) before invoking a write tool. "
-        "If a user asks for something outside their role, politely explain "
-        "what they can do instead.\n\n"
+        "call.\n\n"
+        "Be action-oriented. When the user asks for something doable (book a "
+        "trip, create a record, list their stuff), take the action right away "
+        "using sensible defaults instead of running a multi-question intake. "
+        "If a detail is missing, pick a reasonable default, do the action, "
+        "and tell the user what you assumed — they can refine in a follow-up. "
+        "Resolve IDs yourself: never ask a user to type a customer_id, "
+        "trip_id, or org_name. Call the appropriate list_* tool first to "
+        "look up the ID, then proceed. For travel agents booking a trip with "
+        "no customer specified, list your customers and pick the first one "
+        "as the default. For dates, default to depart ~2 weeks out and "
+        "return ~5–7 days later. For cost, ~1500 USD. For type, 'flight'. "
+        "After the write succeeds, summarize what you did in one short line "
+        "and offer to change any field. Only ask a clarifying question when "
+        "the request itself is genuinely ambiguous (e.g., 'fix the trip' — "
+        "which trip?). If a user asks for something outside their role, "
+        "politely explain what they can do instead.\n\n"
         f"User profile:\n{json.dumps(profile, indent=2, default=str)}"
     )
 
@@ -309,6 +322,9 @@ async def home(request: Request, response: Response):
     user = await _get_user(request, response)
     if user:
         return RedirectResponse(url="/dashboard")
+    # Logged out — drop any leftover chat history so the next sign-in starts fresh.
+    request.session.pop("conversation", None)
+    request.session.pop("conversation_owner", None)
     return templates.TemplateResponse(request=request, name="home.html")
 
 
@@ -714,6 +730,15 @@ async def chat_save(request: Request, response: Response):
     conversation.append({"role": "user", "content": user_msg})
     conversation.append({"role": "assistant", "content": assistant_msg})
     request.session["conversation"] = conversation
+    return JSONResponse({"ok": True})
+
+
+@app.post("/chat/clear")
+async def chat_clear(request: Request, response: Response):
+    user = await _get_user(request, response)
+    if not user:
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+    request.session["conversation"] = []
     return JSONResponse({"ok": True})
 
 
