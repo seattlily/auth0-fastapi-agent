@@ -26,6 +26,43 @@
     {% endif %}
 </section>
 
+<section class="token-section">
+    <h3>
+        Step-up authentication
+        {% if enrollments %}
+        <span class="kind-pill" style="background:#E5F8EC; color:#0E6B33;">Enrolled</span>
+        {% else %}
+        <span class="kind-pill opaque">Not enrolled</span>
+        {% endif %}
+    </h3>
+    {% if enrollments %}
+    <p class="muted" style="font-size:0.9rem;">
+        Sensitive actions (creating/deleting orgs, booking/cancelling trips) push approval requests to the registered factor{{ '' if enrollments|length == 1 else 's' }} below.
+    </p>
+    <table class="claims-table" style="margin-top:0.85rem;">
+        <thead><tr><th>Type</th><th>Method</th><th>Identifier</th><th>Enrolled</th></tr></thead>
+        <tbody>
+        {% for e in enrollments %}
+        <tr>
+            <td>{{ e.type or '—' }}</td>
+            <td>{{ e.auth_method or e.name or '—' }}</td>
+            <td>{{ e.phone_number or e.identifier or '—' }}</td>
+            <td>{{ e.enrolled_at or '—' }}</td>
+        </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    <a href="/mfa/enroll?return_to=/profile" class="btn btn-secondary btn-small" style="margin-top:1rem;">Enroll another device</a>
+    {% else %}
+    <p class="muted" style="font-size:0.92rem;">
+        You haven't registered a device yet. Until you do, sensitive actions
+        will fail with a step-up error.
+        {% if enrollment_error %}<br><br><small style="opacity:0.8;">Note: couldn't read enrollment status from Auth0 ({{ enrollment_error }}). The enroll button still works.</small>{% endif %}
+    </p>
+    <a href="/mfa/enroll?return_to=/profile" class="btn" style="margin-top:0.85rem;">Set up step-up authentication</a>
+    {% endif %}
+</section>
+
 <div class="tabs" role="tablist">
     <button type="button" class="tab-btn active" role="tab" data-target="tab-id-token">
         ID Token <span class="kind-pill">JWS</span>

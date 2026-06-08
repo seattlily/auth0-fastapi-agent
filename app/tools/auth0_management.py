@@ -13,6 +13,7 @@ Required scopes on the M2M grant:
 - `read:organization_members`
 - `delete:organizations`
 - `create:guardian_enrollment_tickets`  (for /mfa/enroll)
+- `read:guardian_enrollments`           (to show enrollment status)
 Authorize them under Auth0 Dashboard → APIs → Auth0 Management API
 → Machine to Machine Applications → {your app}.
 """
@@ -138,6 +139,20 @@ async def get_organization_by_name(name: str) -> dict | None:
         return None
     _raise_for_status(resp, "get organization by name")
     return resp.json()
+
+
+async def list_user_enrollments(user_id: str) -> list[dict[str, Any]]:
+    """List the Guardian factors the user has enrolled. Returns a
+    possibly-empty list of enrollment records. Empty list means the
+    user has nothing on file and CIBA step-up will fail."""
+    token = await _get_management_token()
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        resp = await client.get(
+            f"{_api_base()}/users/{user_id}/enrollments",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+    _raise_for_status(resp, "list user enrollments")
+    return resp.json() or []
 
 
 async def create_enrollment_ticket(

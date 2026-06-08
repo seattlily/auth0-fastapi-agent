@@ -46,6 +46,7 @@ from tools.auth0_management import (
     delete_organization,
     get_organization_by_name,
     list_organization_members,
+    list_user_enrollments,
     reconcile_companies_with_auth0,
     sync_status,
 )
@@ -366,11 +367,25 @@ async def dashboard(request: Request, response: Response):
     visible_tools = [s["function"]["name"] for s in cz_visible_schemas(ctx)] + [
         s["function"]["name"] for s in visible_google_schemas(ctx)
     ]
+
+    # Surface a one-shot enrollment nudge for users who'll need step-up
+    # but haven't registered a device yet. Skip the lookup for roles
+    # that don't trigger CIBA-gated actions.
+    needs_enrollment = False
+    if role in ("compass_admin", "travel_agent"):
+        user_sub = ctx.get("sub") or user.get("sub")
+        if user_sub:
+            try:
+                needs_enrollment = not await list_user_enrollments(user_sub)
+            except ManagementError:
+                pass
+
     common = {
         "user": user,
         "ctx": ctx,
         "messages": request.session.get("conversation", []),
         "visible_tools": visible_tools,
+        "needs_enrollment": needs_enrollment,
     }
 
     if role == "compass_admin":
@@ -755,6 +770,16 @@ async def profile(request: Request, response: Response):
         decode_jwt_claims(access_token) if access_token_kind == "jws" else {}
     )
     id_token_header = decode_jwt_header(id_token) if id_token else {}
+
+    enrollments: list[dict] = []
+    enrollment_error: str | None = None
+    user_sub = ctx.get("sub") or user.get("sub")
+    if user_sub:
+        try:
+            enrollments = await list_user_enrollments(user_sub)
+        except ManagementError as e:
+            enrollment_error = str(e)
+
     return templates.TemplateResponse(
         request=request,
         name="profile.html",
@@ -768,6 +793,8 @@ async def profile(request: Request, response: Response):
             "access_token_kind": access_token_kind,
             "access_token_header": access_token_header,
             "access_token_claims": access_token_claims,
+            "enrollments": enrollments,
+            "enrollment_error": enrollment_error,
         },
     )
 
