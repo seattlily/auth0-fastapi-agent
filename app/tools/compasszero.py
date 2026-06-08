@@ -96,12 +96,14 @@ async def _ciba_step_up(ctx: dict, binding_message: str) -> str | None:
         return json.dumps(
             {
                 "error": str(e),
+                "enrollment_url": "/mfa/enroll",
                 "next_step": (
-                    "Tell the user this action is gated on push MFA but "
-                    "their Auth0 user has no enrolled push authenticator. "
-                    "Do NOT retry the action. Suggest they enroll in "
-                    "Auth0 Guardian via their tenant's MFA settings, then "
-                    "try again."
+                    "This action requires a one-time MFA enrollment first. "
+                    "Render this exact markdown link for the user, verbatim: "
+                    "**[Set up step-up authentication](/mfa/enroll)** — they "
+                    "will scan a QR code with the Auth0 Guardian app to "
+                    "register their phone, then come back and ask you to "
+                    "retry. Do NOT call any tools again until they say so."
                 ),
                 "stop_retrying": True,
             }

@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+{% block title %}Set up step-up auth — CompassZero{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>Set up step-up authentication</h1>
+    <span class="muted">One-time enrollment in Auth0 Guardian</span>
+</div>
+
+{% if error %}
+<div class="alert alert-error"><strong>Error:</strong> {{ error }}</div>
+<p class="muted">Make sure the M2M grant for the Auth0 Management API includes the <code>create:guardian_enrollment_tickets</code> scope, then refresh.</p>
+{% endif %}
+
+{% if ticket %}
+<div class="card" style="text-align:center; max-width: 520px; margin: 0 auto;">
+    <h2 style="margin-bottom:0.4rem;">Scan with your phone</h2>
+    <p class="muted" style="font-size:0.92rem; margin-bottom:1.25rem;">
+        Install the <strong>Auth0 Guardian</strong> app from the App Store or Google Play, then scan this QR code to register your device for push approvals.
+    </p>
+    <img
+        src="https://api.qrserver.com/v1/create-qr-code/?data={{ ticket.ticket_url|urlencode }}&size=240x240&margin=8"
+        alt="Auth0 Guardian enrollment QR code"
+        style="display:block; margin:0 auto; border-radius: var(--radius); background: #fff; padding: 0.5rem;"
+        width="240" height="240"
+    >
+    <p class="muted" style="font-size:0.82rem; margin-top:1.25rem;">
+        Or open this URL on your phone manually:
+    </p>
+    <p style="word-break: break-all; margin-top:0.4rem;">
+        <a href="{{ ticket.ticket_url }}" target="_blank" rel="noopener noreferrer" style="font-family: var(--mono); font-size: 0.78rem;">{{ ticket.ticket_url }}</a>
+    </p>
+    <a href="{{ return_to }}" class="btn" style="margin-top:1.5rem;">I've enrolled — go back</a>
+</div>
+{% endif %}
+
+<div class="card" style="font-size:0.9rem; max-width: 720px; margin: 1.5rem auto 0 auto;">
+    <h3 style="margin-bottom:0.6rem;">Why this step?</h3>
+    <p class="muted" style="margin-bottom:0.6rem;">
+        CompassZero gates sensitive actions — admins creating or deleting Auth0 organizations, and travel agents booking or cancelling trips — on a fresh approval from your phone via Auth0's CIBA flow.
+    </p>
+    <p class="muted">
+        Enrolling once registers your device with Auth0 Guardian. Future approvals are pushed to your phone in real time, so you tap "Approve" and the action proceeds — no codes, no extra logins.
+    </p>
+</div>
+{% endblock %}

@@ -7,10 +7,14 @@ AUTH0_CLIENT_ID / AUTH0_CLIENT_SECRET; if you'd rather use a
 dedicated M2M app, set AUTH0_MGMT_CLIENT_ID and
 AUTH0_MGMT_CLIENT_SECRET.
 
-Required scopes on the M2M grant: `create:organizations`,
-`read:organizations`, `read:organization_members`. Authorize them
-under Auth0 Dashboard → APIs → Auth0 Management API → Machine to
-Machine Applications → {your app}.
+Required scopes on the M2M grant:
+- `create:organizations`
+- `read:organizations`
+- `read:organization_members`
+- `delete:organizations`
+- `create:guardian_enrollment_tickets`  (for /mfa/enroll)
+Authorize them under Auth0 Dashboard → APIs → Auth0 Management API
+→ Machine to Machine Applications → {your app}.
 """
 
 import asyncio
@@ -133,6 +137,27 @@ async def get_organization_by_name(name: str) -> dict | None:
     if resp.status_code == 404:
         return None
     _raise_for_status(resp, "get organization by name")
+    return resp.json()
+
+
+async def create_enrollment_ticket(
+    user_id: str, send_mail: bool = False
+) -> dict[str, Any]:
+    """Create a Guardian MFA enrollment ticket for the user. The
+    returned ticket_url is a one-shot enrollment link the user opens
+    on their phone — they pick a factor (push / SMS / OTP) and
+    register their device. Use send_mail=True to also have Auth0
+    email it to them; we keep it false because demo users typically
+    can't access their inbox."""
+    token = await _get_management_token()
+    body = {"user_id": user_id, "send_mail": send_mail}
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        resp = await client.post(
+            f"{_api_base()}/guardian/enrollments/ticket",
+            json=body,
+            headers={"Authorization": f"Bearer {token}"},
+        )
+    _raise_for_status(resp, "create enrollment ticket")
     return resp.json()
 
 

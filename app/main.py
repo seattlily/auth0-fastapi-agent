@@ -38,9 +38,10 @@ from permissions import (
     has_any_permission,
     has_permission,
 )
-from tools.auth0_ciba import CibaError, step_up
+from tools.auth0_ciba import CibaError, CibaNotEnrolledError, step_up
 from tools.auth0_management import (
     ManagementError,
+    create_enrollment_ticket,
     create_organization,
     delete_organization,
     get_organization_by_name,
@@ -497,6 +498,11 @@ async def companies_create(request: Request, response: Response):
             user_sub=ctx.get("sub"),
             binding_message=f"Approve creating Auth0 organization: {display_name} ({name})",
         )
+    except CibaNotEnrolledError:
+        return RedirectResponse(
+            url=f"/mfa/enroll?return_to={quote_plus('/companies')}",
+            status_code=303,
+        )
     except CibaError as e:
         return RedirectResponse(
             url=f"/companies?error={quote_plus(f'CIBA step-up failed: {e}')}",
@@ -546,6 +552,11 @@ async def companies_delete(
                 f"Approve DELETING Auth0 organization: "
                 f"{company['display_name']} ({company['org_name']})"
             ),
+        )
+    except CibaNotEnrolledError:
+        return RedirectResponse(
+            url=f"/mfa/enroll?return_to={quote_plus('/companies/' + company_id)}",
+            status_code=303,
         )
     except CibaError as e:
         return RedirectResponse(
@@ -909,6 +920,43 @@ async def chat_clear(request: Request, response: Response):
         return JSONResponse({"error": "unauthorized"}, status_code=401)
     request.session["conversation"] = []
     return JSONResponse({"ok": True})
+
+
+# ---------- MFA enrollment (Guardian ticket) ----------
+
+
+@app.get("/mfa/enroll")
+async def mfa_enroll(request: Request, response: Response):
+    user, _, ctx = await require_login(request, response)
+    if not user:
+        return RedirectResponse(url="/auth/login")
+
+    return_to = request.query_params.get("return_to") or "/dashboard"
+    user_sub = ctx.get("sub") or user.get("sub")
+
+    ticket: dict | None = None
+    error: str | None = None
+    if not user_sub:
+        error = "no user sub on token — cannot mint enrollment ticket"
+    else:
+        try:
+            ticket = await create_enrollment_ticket(
+                user_id=user_sub, send_mail=False
+            )
+        except ManagementError as e:
+            error = str(e)
+
+    return templates.TemplateResponse(
+        request=request,
+        name="mfa_enroll.html",
+        context={
+            "user": user,
+            "ctx": ctx,
+            "ticket": ticket,
+            "error": error,
+            "return_to": return_to,
+        },
+    )
 
 
 # ---------- connections (My Account API) ----------
