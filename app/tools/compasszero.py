@@ -77,24 +77,45 @@ async def list_companies(args: dict, ctx: dict) -> str:
 
 async def _ciba_step_up(ctx: dict, binding_message: str) -> str | None:
     """Run CIBA step-up against the signed-in user. Returns None on
-    approval or a JSON error string if step-up fails (so callers can
-    return it directly to the LLM)."""
-    from .auth0_ciba import CibaError, step_up
+    approval (or when CIBA is bypassed via env var). Returns a JSON
+    error string if step-up fails so callers can return it directly
+    to the LLM — and so the LLM stops retrying."""
+    from .auth0_ciba import CibaError, CibaNotEnrolledError, step_up
 
     sub = ctx.get("sub")
     if not sub:
         return json.dumps(
-            {"error": "step-up required but no user sub in token — cannot initiate CIBA"}
+            {
+                "error": "step-up required but no user sub in token — cannot initiate CIBA",
+                "stop_retrying": True,
+            }
         )
     try:
         await step_up(user_sub=sub, binding_message=binding_message)
+    except CibaNotEnrolledError as e:
+        return json.dumps(
+            {
+                "error": str(e),
+                "next_step": (
+                    "Tell the user this action is gated on push MFA but "
+                    "their Auth0 user has no enrolled push authenticator. "
+                    "Do NOT retry the action. Suggest they enroll in "
+                    "Auth0 Guardian via their tenant's MFA settings, then "
+                    "try again."
+                ),
+                "stop_retrying": True,
+            }
+        )
     except CibaError as e:
         return json.dumps(
             {
-                "error": (
-                    f"Step-up authentication failed: {e}. "
-                    "Approve the prompt on your enrolled device and try again."
-                )
+                "error": f"Step-up authentication failed: {e}",
+                "next_step": (
+                    "Tell the user the step-up prompt was denied or "
+                    "timed out. Do NOT retry the action automatically — "
+                    "ask them to confirm they want to try again."
+                ),
+                "stop_retrying": True,
             }
         )
     return None

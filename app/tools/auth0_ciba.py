@@ -29,9 +29,48 @@ import httpx
 CIBA_GRANT = "urn:openid:params:grant-type:ciba"
 LOGIN_HINT_FORMAT = "iss_sub"
 
+# Auth0 error codes / phrases that indicate the user has no enrolled
+# push factor (Auth0 Guardian app) and therefore cannot complete CIBA.
+NOT_ENROLLED_HINTS = (
+    "user_not_eligible",
+    "no_eligible",
+    "no_push",
+    "not enrolled",
+    "no authenticators",
+    "no authenticator",
+    "no_authenticator",
+)
+ENROLLMENT_HINT_MSG = (
+    "Looks like this user has no push authenticator enrolled in "
+    "Auth0 Guardian. Set up MFA push enrollment in your tenant "
+    "(Dashboard → Security → Multi-factor Authentication → enable "
+    "'Push Notifications using Auth0 Guardian'), then have the user "
+    "log out and back in to register a device. While iterating on "
+    "the demo you can also set CIBA_REQUIRED=false in .env to "
+    "bypass step-up entirely."
+)
+
 
 class CibaError(RuntimeError):
     pass
+
+
+class CibaNotEnrolledError(CibaError):
+    """Raised specifically when /bc-authorize fails because the user
+    has no push factor enrolled. Has its own subclass so callers can
+    surface a more actionable message than a generic CibaError."""
+
+
+def is_ciba_required() -> bool:
+    """When CIBA_REQUIRED is set to a falsy value, step_up() becomes a
+    no-op. Useful for local demos where Guardian push isn't yet
+    configured. Defaults to enabled."""
+    return os.environ.get("CIBA_REQUIRED", "true").lower() not in (
+        "0",
+        "false",
+        "no",
+        "off",
+    )
 
 
 def _domain() -> str:
@@ -94,6 +133,11 @@ async def initiate_bc_authorize(
             )
         except Exception:
             detail = resp.text
+        lowered = (detail or "").lower()
+        if any(h in lowered for h in NOT_ENROLLED_HINTS):
+            raise CibaNotEnrolledError(
+                f"CIBA bc-authorize: {detail}. {ENROLLMENT_HINT_MSG}"
+            )
         raise CibaError(
             f"CIBA bc-authorize failed ({resp.status_code}): {detail}"
         )
@@ -159,7 +203,13 @@ async def step_up(
 ) -> dict[str, Any]:
     """One-shot step-up: initiate the CIBA request, then poll until
     the user approves on their device. Returns the resulting token
-    set; raises CibaError on any failure."""
+    set; raises CibaError on any failure.
+
+    Skipped (returns {"bypassed": True}) when CIBA_REQUIRED env var is
+    set to a falsy value — useful when iterating on the demo without
+    having Guardian push set up yet."""
+    if not is_ciba_required():
+        return {"bypassed": True}
     if not user_sub:
         raise CibaError("missing user sub for CIBA step-up")
     init = await initiate_bc_authorize(
