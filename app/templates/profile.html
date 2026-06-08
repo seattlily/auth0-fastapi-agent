@@ -26,6 +26,7 @@
     {% endif %}
 </section>
 
+{% if show_enrollment_section %}
 <section class="token-section">
     <h3>
         Step-up authentication
@@ -62,6 +63,7 @@
     <a href="/mfa/enroll?return_to=/profile" class="btn" style="margin-top:0.85rem;">Set up step-up authentication</a>
     {% endif %}
 </section>
+{% endif %}
 
 <div class="tabs" role="tablist">
     <button type="button" class="tab-btn active" role="tab" data-target="tab-id-token">

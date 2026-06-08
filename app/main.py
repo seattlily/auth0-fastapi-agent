@@ -368,11 +368,10 @@ async def dashboard(request: Request, response: Response):
         s["function"]["name"] for s in visible_google_schemas(ctx)
     ]
 
-    # Surface a one-shot enrollment nudge for users who'll need step-up
-    # but haven't registered a device yet. Skip the lookup for roles
-    # that don't trigger CIBA-gated actions.
+    # Surface a one-shot enrollment nudge — admin-only so the banner
+    # doesn't appear on agent / customer dashboards.
     needs_enrollment = False
-    if role in ("compass_admin", "travel_agent"):
+    if role == "compass_admin":
         user_sub = ctx.get("sub") or user.get("sub")
         if user_sub:
             try:
@@ -771,14 +770,19 @@ async def profile(request: Request, response: Response):
     )
     id_token_header = decode_jwt_header(id_token) if id_token else {}
 
+    # Enrollment status section is admin-only; skip the API call for
+    # other roles to keep the page cheap and avoid surfacing the
+    # section to users who don't trigger CIBA-gated UI actions.
     enrollments: list[dict] = []
     enrollment_error: str | None = None
-    user_sub = ctx.get("sub") or user.get("sub")
-    if user_sub:
-        try:
-            enrollments = await list_user_enrollments(user_sub)
-        except ManagementError as e:
-            enrollment_error = str(e)
+    show_enrollment_section = ctx.get("role") == "compass_admin"
+    if show_enrollment_section:
+        user_sub = ctx.get("sub") or user.get("sub")
+        if user_sub:
+            try:
+                enrollments = await list_user_enrollments(user_sub)
+            except ManagementError as e:
+                enrollment_error = str(e)
 
     return templates.TemplateResponse(
         request=request,
@@ -795,6 +799,7 @@ async def profile(request: Request, response: Response):
             "access_token_claims": access_token_claims,
             "enrollments": enrollments,
             "enrollment_error": enrollment_error,
+            "show_enrollment_section": show_enrollment_section,
         },
     )
 
