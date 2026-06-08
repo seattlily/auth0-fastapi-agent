@@ -266,6 +266,30 @@ async def create_company(args: dict, ctx: dict) -> str:
     return json.dumps({"ok": True, "company": company})
 
 
+async def create_auth0_organization(args: dict, ctx: dict) -> str:
+    """Create a real Auth0 Organization via the Management API and mirror
+    it into the local CompassZero company list so the dashboard reflects it."""
+    require(ctx, "manage:companies")
+    from .auth0_management import ManagementError, create_organization
+
+    name = (args.get("name") or "").strip()
+    display_name = (args.get("display_name") or name).strip()
+    if not name:
+        return json.dumps({"error": "name is required (lowercase slug, no spaces)."})
+    try:
+        org = await create_organization(name=name, display_name=display_name)
+    except ManagementError as e:
+        return json.dumps({"error": str(e)})
+
+    company = add_company(
+        org_name=org.get("name", name),
+        display_name=org.get("display_name", display_name),
+        budget=float(args.get("budget") or 100000),
+        currency=args.get("currency") or "USD",
+    )
+    return json.dumps({"ok": True, "auth0_org": org, "company": company})
+
+
 async def create_customer(args: dict, ctx: dict) -> str:
     require(ctx, "manage:companies")
     customer = add_customer(
@@ -423,7 +447,7 @@ TOOLS: dict[str, dict] = {
             "type": "function",
             "function": {
                 "name": "create_company",
-                "description": "Add a new company customer to CompassZero. Admin-only.",
+                "description": "Add a local CompassZero company record (mock data only — does NOT create the Auth0 organization). Admin-only. Prefer create_auth0_organization unless you specifically need a local-only entry.",
                 "parameters": {
                     "type": "object",
                     "properties": {
@@ -433,6 +457,34 @@ TOOLS: dict[str, dict] = {
                         "currency":     {"type": "string", "description": "ISO currency code. Default USD."},
                     },
                     "required": ["org_name", "display_name", "budget"],
+                },
+            },
+        },
+    },
+    "create_auth0_organization": {
+        "required_scopes": ("manage:companies",),
+        "fn": create_auth0_organization,
+        "schema": {
+            "type": "function",
+            "function": {
+                "name": "create_auth0_organization",
+                "description": (
+                    "Create a real Auth0 Organization via the Management API "
+                    "AND mirror it into the local CompassZero company list. "
+                    "Use this whenever an admin says 'create an organization', "
+                    "'add a new company / customer org', 'spin up a tenant for "
+                    "Acme', etc. Admin-only. Requires that the M2M grant for "
+                    "the Auth0 Management API is authorized for this app."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "name":         {"type": "string", "description": "Org slug — lowercase, dashes only, no spaces (e.g. 'acme-inc')."},
+                        "display_name": {"type": "string", "description": "Pretty company name shown in the UI (e.g. 'Acme Inc')."},
+                        "budget":       {"type": "number", "description": "Optional annual travel budget for the local mirror. Default 100000."},
+                        "currency":     {"type": "string", "description": "Optional ISO currency code. Default USD."},
+                    },
+                    "required": ["name", "display_name"],
                 },
             },
         },

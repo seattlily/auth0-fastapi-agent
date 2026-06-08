@@ -1,0 +1,147 @@
+"""Auth0 Management API client — used for admin actions like creating
+organizations and listing org members.
+
+Authentication uses the client_credentials grant against the
+Management API audience. By default it reuses the app's own
+AUTH0_CLIENT_ID / AUTH0_CLIENT_SECRET; if you'd rather use a
+dedicated M2M app, set AUTH0_MGMT_CLIENT_ID and
+AUTH0_MGMT_CLIENT_SECRET.
+
+Required scopes on the M2M grant: `create:organizations`,
+`read:organizations`, `read:organization_members`. Authorize them
+under Auth0 Dashboard → APIs → Auth0 Management API → Machine to
+Machine Applications → {your app}.
+"""
+
+import os
+import time
+from typing import Any
+
+import httpx
+
+
+class ManagementError(RuntimeError):
+    pass
+
+
+_token_cache: dict[str, Any] = {"token": "", "expires_at": 0.0}
+
+
+def _domain() -> str:
+    return os.environ["AUTH0_DOMAIN"]
+
+
+def _audience() -> str:
+    return f"https://{_domain()}/api/v2/"
+
+
+def _api_base() -> str:
+    return f"https://{_domain()}/api/v2"
+
+
+def _client_credentials() -> tuple[str, str]:
+    return (
+        os.environ.get("AUTH0_MGMT_CLIENT_ID") or os.environ["AUTH0_CLIENT_ID"],
+        os.environ.get("AUTH0_MGMT_CLIENT_SECRET") or os.environ["AUTH0_CLIENT_SECRET"],
+    )
+
+
+def _raise_for_status(resp: httpx.Response, action: str) -> None:
+    if resp.status_code < 400:
+        return
+    try:
+        data = resp.json()
+        detail = (
+            data.get("message")
+            or data.get("error_description")
+            or data.get("error")
+            or resp.text
+        )
+    except Exception:
+        detail = resp.text
+    raise ManagementError(
+        f"Auth0 Management API {action} failed ({resp.status_code}): {detail}"
+    )
+
+
+async def _get_management_token() -> str:
+    now = time.time()
+    if _token_cache["token"] and _token_cache["expires_at"] > now + 30:
+        return _token_cache["token"]
+
+    client_id, client_secret = _client_credentials()
+    body = {
+        "grant_type": "client_credentials",
+        "client_id": client_id,
+        "client_secret": client_secret,
+        "audience": _audience(),
+    }
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        resp = await client.post(
+            f"https://{_domain()}/oauth/token",
+            json=body,
+            headers={"Content-Type": "application/json"},
+        )
+    _raise_for_status(resp, "token exchange")
+    data = resp.json()
+    _token_cache["token"] = data["access_token"]
+    _token_cache["expires_at"] = now + int(data.get("expires_in", 3600))
+    return data["access_token"]
+
+
+async def create_organization(
+    name: str, display_name: str, metadata: dict | None = None
+) -> dict:
+    token = await _get_management_token()
+    body: dict[str, Any] = {"name": name, "display_name": display_name}
+    if metadata:
+        body["metadata"] = metadata
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        resp = await client.post(
+            f"{_api_base()}/organizations",
+            json=body,
+            headers={"Authorization": f"Bearer {token}"},
+        )
+    _raise_for_status(resp, "create organization")
+    return resp.json()
+
+
+async def list_organizations() -> list[dict]:
+    token = await _get_management_token()
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        resp = await client.get(
+            f"{_api_base()}/organizations",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+    _raise_for_status(resp, "list organizations")
+    data = resp.json()
+    if isinstance(data, dict):
+        return data.get("organizations") or []
+    return data
+
+
+async def get_organization_by_name(name: str) -> dict | None:
+    token = await _get_management_token()
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        resp = await client.get(
+            f"{_api_base()}/organizations/name/{name}",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+    if resp.status_code == 404:
+        return None
+    _raise_for_status(resp, "get organization by name")
+    return resp.json()
+
+
+async def list_organization_members(org_id: str) -> list[dict]:
+    token = await _get_management_token()
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        resp = await client.get(
+            f"{_api_base()}/organizations/{org_id}/members",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+    _raise_for_status(resp, "list organization members")
+    data = resp.json()
+    if isinstance(data, dict):
+        return data.get("members") or []
+    return data

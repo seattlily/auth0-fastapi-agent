@@ -23,6 +23,36 @@
     </div>
 </div>
 
+{% if auth0_org or auth0_error %}
+<div class="card">
+    <h2>Auth0 organization members</h2>
+    {% if auth0_error %}
+        <div class="alert alert-error" style="margin-top: 0.5rem;"><strong>Management API error:</strong> {{ auth0_error }}</div>
+    {% elif auth0_org %}
+        <p class="muted" style="font-size: 0.9rem;">
+            Auth0 org ID <code>{{ auth0_org.id }}</code> · {{ auth0_members|length }} member{{ '' if auth0_members|length == 1 else 's' }}
+        </p>
+        {% if auth0_members %}
+        <table>
+            <thead><tr><th>Name</th><th>Email</th><th>User ID</th><th>Picture</th></tr></thead>
+            <tbody>
+            {% for m in auth0_members %}
+            <tr>
+                <td>{{ m.name or '—' }}</td>
+                <td>{{ m.email or '—' }}</td>
+                <td><code style="font-size: 0.78rem;">{{ m.user_id }}</code></td>
+                <td>{% if m.picture %}<img src="{{ m.picture }}" alt="" style="width: 28px; height: 28px; border-radius: 50%; object-fit: cover;">{% endif %}</td>
+            </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+        <p class="muted">No members yet — invite users via the Auth0 Dashboard or Management API.</p>
+        {% endif %}
+    {% endif %}
+</div>
+{% endif %}
+
 <div class="card">
     <h2>Travel agents</h2>
     {% if agents %}

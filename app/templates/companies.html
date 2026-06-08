@@ -8,6 +8,31 @@
     <span class="muted">{{ companies|length }} total</span>
 </div>
 
+{% if error %}<div class="alert alert-error"><strong>Error:</strong> {{ error }}</div>{% endif %}
+{% if success %}<div class="alert alert-success"><strong>Success:</strong> {{ success }}</div>{% endif %}
+
+{% if can_manage %}
+<div class="card">
+    <h3>Create new organization</h3>
+    <p class="muted" style="font-size: 0.92rem;">Calls the Auth0 Management API to create a real Organization, then mirrors it into the local CompassZero company list.</p>
+    <form method="post" action="/companies" style="display: grid; grid-template-columns: 1fr 1fr 1fr auto; gap: 0.75rem; align-items: end;">
+        <div>
+            <label class="muted" style="font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.06em; font-weight: 600; display: block; margin-bottom: 0.3rem;">Org slug</label>
+            <input name="name" required pattern="[a-z0-9-]+" placeholder="acme-inc" style="width: 100%; padding: 0.7rem 0.9rem; border: 1px solid var(--border); border-radius: var(--radius-sm); font-family: var(--mono); font-size: 0.9rem;">
+        </div>
+        <div>
+            <label class="muted" style="font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.06em; font-weight: 600; display: block; margin-bottom: 0.3rem;">Display name</label>
+            <input name="display_name" required placeholder="Acme Inc" style="width: 100%; padding: 0.7rem 0.9rem; border: 1px solid var(--border); border-radius: var(--radius-sm); font-size: 0.95rem;">
+        </div>
+        <div>
+            <label class="muted" style="font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.06em; font-weight: 600; display: block; margin-bottom: 0.3rem;">Annual budget</label>
+            <input name="budget" type="number" min="0" step="1000" value="100000" style="width: 100%; padding: 0.7rem 0.9rem; border: 1px solid var(--border); border-radius: var(--radius-sm); font-size: 0.95rem;">
+        </div>
+        <button type="submit" class="btn">Create organization</button>
+    </form>
+</div>
+{% endif %}
+
 <div class="card">
     <table>
         <thead><tr><th>Company</th><th>Org slug</th><th>Customers</th><th>Trips</th><th>Budget</th><th>Spent</th><th>Utilization</th></tr></thead>

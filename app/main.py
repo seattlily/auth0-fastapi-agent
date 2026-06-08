@@ -19,6 +19,7 @@ from mock_data import (
     EXPERIENCES,
     TRAVEL_AGENTS,
     TRIPS,
+    add_company,
     get_agent,
     get_agents,
     get_companies,
@@ -34,6 +35,12 @@ from permissions import (
     get_user_context,
     has_any_permission,
     has_permission,
+)
+from tools.auth0_management import (
+    ManagementError,
+    create_organization,
+    get_organization_by_name,
+    list_organization_members,
 )
 from tools.auth0_my_account import (
     MyAccountError,
@@ -420,7 +427,55 @@ async def companies_page(request: Request, response: Response):
     return templates.TemplateResponse(
         request=request,
         name="companies.html",
-        context={"user": user, "ctx": ctx, "companies": companies, "counts": counts},
+        context={
+            "user": user,
+            "ctx": ctx,
+            "companies": companies,
+            "counts": counts,
+            "can_manage": has_permission(ctx, "manage:companies"),
+            "error": request.query_params.get("error"),
+            "success": request.query_params.get("success"),
+        },
+    )
+
+
+@app.post("/companies")
+async def companies_create(request: Request, response: Response):
+    user, _, ctx = await require_login(request, response)
+    if not user:
+        return RedirectResponse(url="/auth/login")
+    if not has_permission(ctx, "manage:companies"):
+        return RedirectResponse(url="/dashboard", status_code=303)
+
+    from urllib.parse import quote_plus
+
+    form = await request.form()
+    name = (form.get("name") or "").strip()
+    display_name = (form.get("display_name") or name).strip()
+    budget_raw = (form.get("budget") or "100000").strip()
+
+    if not name:
+        return RedirectResponse(url="/companies?error=name+is+required", status_code=303)
+    try:
+        budget = float(budget_raw)
+    except ValueError:
+        return RedirectResponse(url="/companies?error=invalid+budget", status_code=303)
+
+    try:
+        org = await create_organization(name=name, display_name=display_name)
+    except ManagementError as e:
+        return RedirectResponse(
+            url=f"/companies?error={quote_plus(str(e))}", status_code=303
+        )
+
+    add_company(
+        org_name=org.get("name", name),
+        display_name=org.get("display_name", display_name),
+        budget=budget,
+    )
+    return RedirectResponse(
+        url=f"/companies?success={quote_plus('Created Auth0 organization ' + org.get('name', name))}",
+        status_code=303,
     )
 
 
@@ -445,6 +500,18 @@ async def company_detail(request: Request, response: Response, company_id: str):
     trips = get_trips(org_name=company["org_name"])
     customer_names = {c["id"]: c["name"] for c in customers}
     agent_names = {a["id"]: a["name"] for a in agents}
+
+    auth0_org: dict | None = None
+    auth0_members: list[dict] = []
+    auth0_error: str | None = None
+    if has_permission(ctx, "manage:companies"):
+        try:
+            auth0_org = await get_organization_by_name(company["org_name"])
+            if auth0_org:
+                auth0_members = await list_organization_members(auth0_org["id"])
+        except ManagementError as e:
+            auth0_error = str(e)
+
     return templates.TemplateResponse(
         request=request,
         name="company_detail.html",
@@ -457,6 +524,9 @@ async def company_detail(request: Request, response: Response, company_id: str):
             "trips": trips,
             "customer_names": customer_names,
             "agent_names": agent_names,
+            "auth0_org": auth0_org,
+            "auth0_members": auth0_members,
+            "auth0_error": auth0_error,
         },
     )
 
