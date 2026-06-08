@@ -2,6 +2,7 @@ import base64
 import json
 import os
 import secrets
+import time
 
 from auth0_fastapi.auth.auth_client import AuthClient
 from auth0_fastapi.config import Auth0Config
@@ -85,6 +86,9 @@ app.add_middleware(
 )
 app.mount("/static", StaticFiles(directory="static"), name="static")
 templates = Jinja2Templates(directory="templates")
+# Cache-bust static assets on every restart so template/CSS changes
+# show up without needing a hard refresh.
+templates.env.globals["static_version"] = str(int(time.time()))
 
 
 # ---------- Auth0 SDK setup ----------
