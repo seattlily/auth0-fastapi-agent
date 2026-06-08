@@ -99,6 +99,98 @@ async def book_trip(args: dict, ctx: dict) -> str:
     return json.dumps({"ok": True, "trip": trip})
 
 
+# ---------- flight search (mock) ----------
+
+
+_AIRLINES = [
+    ("United Airlines", "UA", 1000),
+    ("Delta", "DL", 2000),
+    ("Lufthansa", "LH", 3000),
+]
+
+
+def _mock_flights(origin: str, destination: str, date: str) -> list[dict]:
+    """Deterministic-ish mock flight options. Same inputs → same offers."""
+    o, d = origin.strip().upper(), destination.strip().upper()
+    seed = sum(ord(c) for c in (o + d + date)) % 100
+    base = 250 + seed * 8
+
+    schedules = [
+        ("08:30", "12:15", "3h 45m", 0, 0),
+        ("13:00", "16:55", "3h 55m", 0, 75),
+        ("21:45", "06:30+1", "5h 45m", 1, -40),
+    ]
+    flights = []
+    for (name, code, base_no), (dep, arr, dur, stops, delta) in zip(_AIRLINES, schedules):
+        flights.append(
+            {
+                "id": f"fl_{code}{base_no + seed}_{o}{d}_{date}",
+                "airline": name,
+                "flight_no": f"{code}{base_no + seed}",
+                "origin": o,
+                "destination": d,
+                "date": date,
+                "depart_time": dep,
+                "arrive_time": arr,
+                "duration": dur,
+                "stops": stops,
+                "price": base + delta,
+                "currency": "USD",
+            }
+        )
+    return flights
+
+
+async def search_flights(args: dict, ctx: dict) -> str:
+    require(ctx, "book:trips")
+    origin = (args.get("origin") or "").strip()
+    destination = (args.get("destination") or "").strip()
+    date = (args.get("date") or "").strip()
+    if not (origin and destination and date):
+        return json.dumps({"error": "origin, destination, and date are all required."})
+    return json.dumps(
+        {
+            "origin": origin.upper(),
+            "destination": destination.upper(),
+            "date": date,
+            "flights": _mock_flights(origin, destination, date),
+        }
+    )
+
+
+# ---------- trip drill-down ----------
+
+
+async def get_trip_details(args: dict, ctx: dict) -> str:
+    require_any(ctx, "read:my_trips", "read:company_trips", "read:all_trips")
+    trip = get_trip(args["trip_id"])
+    if not trip:
+        return json.dumps({"error": f"unknown trip_id: {args['trip_id']}"})
+    customer = get_customer(trip["customer_id"])
+    if not has_permission(ctx, "read:all_trips"):
+        if has_permission(ctx, "read:company_trips"):
+            if not customer or customer["org_name"] != ctx.get("org_name"):
+                raise PermissionDenied(
+                    f"Trip {args['trip_id']} is outside your organization."
+                )
+        elif has_permission(ctx, "read:my_trips"):
+            if trip["customer_id"] != ctx.get("customer_id"):
+                raise PermissionDenied(
+                    f"Trip {args['trip_id']} is not yours."
+                )
+    return json.dumps(
+        {
+            "trip": trip,
+            "customer": (
+                {"id": customer["id"], "name": customer["name"], "email": customer["email"]}
+                if customer
+                else None
+            ),
+            "experiences": get_experiences_for_trip(trip["id"]),
+        }
+    )
+
+
 async def book_experience(args: dict, ctx: dict) -> str:
     require(ctx, "book:experiences")
     trip = get_trip(args["trip_id"])
@@ -141,6 +233,22 @@ async def create_customer(args: dict, ctx: dict) -> str:
         email=args["email"],
         org_name=args["org_name"],
         agent_id=args.get("agent_id"),
+    )
+    return json.dumps({"ok": True, "customer": customer})
+
+
+async def create_my_customer(args: dict, ctx: dict) -> str:
+    require(ctx, "book:trips")
+    org_name = ctx.get("org_name")
+    if not org_name:
+        return json.dumps(
+            {"error": "no org_name on your token — log in via your travel agency's organization"}
+        )
+    customer = add_customer(
+        name=args["name"],
+        email=args["email"],
+        org_name=org_name,
+        agent_id=ctx.get("agent_id"),
     )
     return json.dumps({"ok": True, "customer": customer})
 
@@ -306,6 +414,81 @@ TOOLS: dict[str, dict] = {
                         "agent_id": {"type": "string", "description": "Optional travel agent ID (ag_xxx)."},
                     },
                     "required": ["name", "email", "org_name"],
+                },
+            },
+        },
+    },
+    "create_my_customer": {
+        "required_scopes": ("book:trips",),
+        "fn": create_my_customer,
+        "schema": {
+            "type": "function",
+            "function": {
+                "name": "create_my_customer",
+                "description": (
+                    "Create a new customer in the signed-in agent's own organization. "
+                    "Use this whenever a travel agent says 'add a new customer', "
+                    "'create a customer', etc. The org is auto-filled from the user's "
+                    "token — never ask the user for org_name. Just collect name and email."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "name":  {"type": "string", "description": "Customer's full name."},
+                        "email": {"type": "string", "description": "Customer's email address."},
+                    },
+                    "required": ["name", "email"],
+                },
+            },
+        },
+    },
+    "search_flights": {
+        "required_scopes": ("book:trips",),
+        "fn": search_flights,
+        "schema": {
+            "type": "function",
+            "function": {
+                "name": "search_flights",
+                "description": (
+                    "Search available flights for a date and origin/destination pair. "
+                    "Returns 3 mock flight options (airline, flight_no, depart/arrive "
+                    "times, duration, stops, price). Use this whenever the user asks "
+                    "to look for flights, find a flight, or compare flight options. "
+                    "After the user picks one, call book_trip with the chosen flight's "
+                    "origin, destination, date, and price."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "origin":      {"type": "string", "description": "Origin city or IATA code (e.g., 'JFK', 'New York')."},
+                        "destination": {"type": "string", "description": "Destination city or IATA code."},
+                        "date":        {"type": "string", "description": "Departure date in YYYY-MM-DD."},
+                    },
+                    "required": ["origin", "destination", "date"],
+                },
+            },
+        },
+    },
+    "get_trip_details": {
+        "required_scopes": ("read:my_company",),
+        "fn": get_trip_details,
+        "schema": {
+            "type": "function",
+            "function": {
+                "name": "get_trip_details",
+                "description": (
+                    "Fetch full details for a single trip — the trip record, the "
+                    "owning customer's name/email, and any booked experiences. "
+                    "Use whenever the user asks for details on a specific trip. "
+                    "Customers can only view their own; agents can view anything in "
+                    "their org; admins can view any trip."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "trip_id": {"type": "string", "description": "Trip ID (tr_xxx)."},
+                    },
+                    "required": ["trip_id"],
                 },
             },
         },
