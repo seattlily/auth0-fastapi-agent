@@ -12,73 +12,90 @@
     <div class="kpi"><div class="kpi-label">Role</div><div class="kpi-value" style="font-size:1.2rem">{{ ctx.role|replace('_',' ')|title }}</div></div>
     <div class="kpi"><div class="kpi-label">Organization</div><div class="kpi-value" style="font-size:1.2rem">{{ ctx.org_name or '—' }}</div></div>
     <div class="kpi"><div class="kpi-label">Permissions</div><div class="kpi-value" style="font-size:1.05rem">{{ ctx.permissions|length }}</div></div>
+    <div class="kpi"><div class="kpi-label">Subject</div><div class="kpi-value" style="font-size:0.85rem; font-family: var(--mono); word-break: break-all;">{{ user.sub or '—' }}</div></div>
 </div>
 
 <section class="token-section">
-    <h3>Permissions (from access token)</h3>
+    <h3>Permissions <span class="muted" style="font-weight:400; font-size:0.78rem;">— from access token</span></h3>
     {% if ctx.permissions %}
-    <ul style="margin: 0 0 0 1.25rem;">
-        {% for p in ctx.permissions|sort %}<li><code>{{ p }}</code></li>{% endfor %}
-    </ul>
+    <div style="display:flex; flex-wrap:wrap; gap:0.4rem;">
+        {% for p in ctx.permissions|sort %}<code style="background:var(--surface-alt); padding:0.2rem 0.55rem; border-radius:var(--radius-pill); font-size:0.78rem;">{{ p }}</code>{% endfor %}
+    </div>
     {% else %}
     <p class="muted">No permissions on this token. Check that RBAC is enabled on the CompassZero API and that this user has a role assigned.</p>
     {% endif %}
 </section>
 
-<section class="token-section">
-    <h3>ID Token Claims</h3>
-    <table class="claims-table">
-        {% for key, value in id_token_claims.items() %}
-        <tr>
-            <td class="claim-key">{{ key }}</td>
-            <td class="claim-value">{{ value }}</td>
-        </tr>
-        {% endfor %}
-    </table>
-</section>
+<div class="token-grid">
+    <section class="token-section">
+        <h3>ID Token <span class="kind-pill">JWS</span></h3>
+        {% if id_token_claims %}
+        <table class="claims-table">
+            {% for key, value in id_token_claims.items() %}
+            <tr>
+                <td class="claim-key">{{ key }}</td>
+                <td class="claim-value">{{ value }}</td>
+            </tr>
+            {% endfor %}
+        </table>
+        {% else %}
+        <p class="muted">No ID token claims available.</p>
+        {% endif %}
+        {% if id_token %}
+        <details>
+            <summary>Raw token + header</summary>
+            {% if id_token_header %}
+            <p class="muted" style="margin-top:0.5rem; font-size:0.78rem;">
+                <code>alg={{ id_token_header.alg or '?' }}</code> ·
+                <code>typ={{ id_token_header.typ or '?' }}</code>
+                {% if id_token_header.kid %}· <code>kid={{ id_token_header.kid }}</code>{% endif %}
+            </p>
+            {% endif %}
+            <pre class="token-raw">{{ id_token }}</pre>
+        </details>
+        {% endif %}
+    </section>
 
-<section class="token-section">
-    <h3>Access Token Claims</h3>
-    {% if access_token_kind == "jws" and access_token_claims %}
-    <table class="claims-table">
-        {% for key, value in access_token_claims.items() %}
-        <tr>
-            <td class="claim-key">{{ key }}</td>
-            <td class="claim-value">{{ value }}</td>
-        </tr>
-        {% endfor %}
-    </table>
-    {% elif access_token_kind == "jwe" %}
-    <p class="muted">
-        This access token is <strong>JWE-encrypted</strong>
-        ({{ access_token_header.alg or "?" }} / {{ access_token_header.enc or "?" }}).
-        The payload can only be decrypted with Auth0's tenant key,
-        which intentionally isn't shared with the application — so
-        inner claims aren't viewable client-side. App functionality is
-        unaffected.
-    </p>
-    {% elif access_token_kind == "opaque" %}
-    <p class="muted">
-        Access token is <strong>opaque</strong>. Set <code>AUTH0_AUDIENCE=https://compasszero.api</code> in <code>.env</code> to get a signed JWT with viewable claims.
-    </p>
-    {% else %}
-    <p class="muted">No access token available.</p>
-    {% endif %}
-</section>
-
-{% if access_token_kind in ("jws", "jwe") %}
-<section class="token-section">
-    <h3>Access Token Header</h3>
-    <pre class="token-raw">{{ access_token_header_pretty }}</pre>
-</section>
-{% endif %}
-
-<section class="token-section">
-    <h3>Access Token (Raw)</h3>
-    {% if access_token %}
-    <pre class="token-raw">{{ access_token }}</pre>
-    {% else %}
-    <p class="muted">No access token available.</p>
-    {% endif %}
-</section>
+    <section class="token-section">
+        <h3>
+            Access Token
+            <span class="kind-pill {{ access_token_kind }}">{{ access_token_kind|upper }}</span>
+        </h3>
+        {% if access_token_kind == "jws" and access_token_claims %}
+        <table class="claims-table">
+            {% for key, value in access_token_claims.items() %}
+            <tr>
+                <td class="claim-key">{{ key }}</td>
+                <td class="claim-value">{{ value }}</td>
+            </tr>
+            {% endfor %}
+        </table>
+        {% elif access_token_kind == "jwe" %}
+        <p class="muted" style="font-size:0.88rem;">
+            JWE-encrypted ({{ access_token_header.alg or "?" }} / {{ access_token_header.enc or "?" }}).
+            The payload is decrypted by Auth0 at API edges; inner claims aren't viewable client-side.
+        </p>
+        {% elif access_token_kind == "opaque" %}
+        <p class="muted" style="font-size:0.88rem;">
+            Opaque token. Set <code>AUTH0_AUDIENCE=https://compasszero.api</code> in <code>.env</code> to get a signed JWT with viewable claims.
+        </p>
+        {% else %}
+        <p class="muted">No access token available.</p>
+        {% endif %}
+        {% if access_token %}
+        <details>
+            <summary>Raw token + header</summary>
+            {% if access_token_header %}
+            <p class="muted" style="margin-top:0.5rem; font-size:0.78rem;">
+                <code>alg={{ access_token_header.alg or '?' }}</code> ·
+                <code>typ={{ access_token_header.typ or '?' }}</code>
+                {% if access_token_header.enc %}· <code>enc={{ access_token_header.enc }}</code>{% endif %}
+                {% if access_token_header.kid %}· <code>kid={{ access_token_header.kid }}</code>{% endif %}
+            </p>
+            {% endif %}
+            <pre class="token-raw">{{ access_token }}</pre>
+        </details>
+        {% endif %}
+    </section>
+</div>
 {% endblock %}

@@ -655,25 +655,30 @@ async def profile(request: Request, response: Response):
     if not user:
         return RedirectResponse(url="/auth/login")
     access_token, _ = _tokens_from_session(session)
+    id_token = ""
+    token_sets = (session or {}).get("token_sets") or []
+    if token_sets:
+        id_token = token_sets[0].get("id_token", "") or ""
+
     access_token_kind = classify_token(access_token)
     access_token_header = decode_jwt_header(access_token) if access_token else {}
     access_token_claims = (
         decode_jwt_claims(access_token) if access_token_kind == "jws" else {}
     )
+    id_token_header = decode_jwt_header(id_token) if id_token else {}
     return templates.TemplateResponse(
         request=request,
         name="profile.html",
         context={
             "user": user,
             "ctx": ctx,
+            "id_token": id_token,
             "id_token_claims": user,
-            "id_token_claims_pretty": json.dumps(user, indent=2, default=str),
+            "id_token_header": id_token_header,
             "access_token": access_token,
             "access_token_kind": access_token_kind,
             "access_token_header": access_token_header,
-            "access_token_header_pretty": json.dumps(access_token_header, indent=2, default=str),
             "access_token_claims": access_token_claims,
-            "access_token_claims_pretty": json.dumps(access_token_claims, indent=2, default=str),
         },
     )
 

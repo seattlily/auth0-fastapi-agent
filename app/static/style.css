@@ -387,6 +387,38 @@ table tbody tr:hover { background: var(--surface-alt); }
 
 /* ---------- profile (token claims) ---------- */
 
+.token-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1.25rem;
+    margin-bottom: 1.25rem;
+}
+.token-grid .token-section { margin-bottom: 0; }
+.token-grid h3 { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; margin-bottom: 0.85rem; }
+.token-grid .kind-pill {
+    font-size: 0.65rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    padding: 0.2rem 0.55rem;
+    border-radius: var(--radius-pill);
+    background: var(--brand-soft);
+    color: var(--brand-dark);
+}
+.token-grid .kind-pill.jwe { background: #FEF3C7; color: #92400E; }
+.token-grid .kind-pill.opaque { background: var(--surface-alt); color: var(--muted); }
+.token-grid details { margin-top: 0.85rem; border-top: 1px solid var(--border-soft); padding-top: 0.85rem; }
+.token-grid summary { cursor: pointer; color: var(--muted); font-size: 0.82rem; font-weight: 600; user-select: none; }
+.token-grid summary:hover { color: var(--text); }
+.token-grid .token-raw { max-height: 200px; font-size: 0.72rem; padding: 0.7rem 0.85rem; margin-top: 0.6rem; }
+.token-grid .claims-table { font-size: 0.82rem; }
+.token-grid .claims-table .claim-key { width: 130px; font-size: 0.78rem; padding: 0.45rem 0.5rem; vertical-align: top; }
+.token-grid .claims-table .claim-value { font-size: 0.78rem; padding: 0.45rem 0.5rem; }
+
+@media (max-width: 900px) {
+    .token-grid { grid-template-columns: 1fr; }
+}
+
 .token-section {
     background: var(--surface);
     border: 1px solid var(--border-soft);
