@@ -28,6 +28,17 @@ import httpx
 
 CIBA_GRANT = "urn:openid:params:grant-type:ciba"
 LOGIN_HINT_FORMAT = "iss_sub"
+BINDING_MESSAGE_MAX = 64  # Auth0's hard cap on binding_message length
+
+
+def truncate_binding(message: str) -> str:
+    """Auth0 rejects binding_message values longer than 64 characters
+    with 'binding message should not exceed 64 characters'. Trim to
+    fit, with an ellipsis when we have to cut."""
+    s = (message or "").strip()
+    if len(s) <= BINDING_MESSAGE_MAX:
+        return s
+    return s[: BINDING_MESSAGE_MAX - 1].rstrip() + "…"
 
 # Auth0 error codes / phrases that indicate the user has no enrolled
 # push factor (Auth0 Guardian app) and therefore cannot complete CIBA.
@@ -111,7 +122,7 @@ async def initiate_bc_authorize(
         "client_id": _client_id(),
         "client_secret": _client_secret(),
         "login_hint": login_hint,
-        "binding_message": binding_message,
+        "binding_message": truncate_binding(binding_message),
         "scope": scope,
     }
     if audience:

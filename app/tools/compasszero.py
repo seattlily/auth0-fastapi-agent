@@ -91,7 +91,9 @@ async def _ciba_step_up(ctx: dict, binding_message: str) -> str | None:
             }
         )
     try:
-        await step_up(user_sub=sub, binding_message=binding_message)
+        # Generous timeout so the user has time to find their phone,
+        # read the binding message, and tap Approve.
+        await step_up(user_sub=sub, binding_message=binding_message, max_seconds=120)
     except CibaNotEnrolledError as e:
         return json.dumps(
             {
@@ -136,9 +138,8 @@ async def book_trip(args: dict, ctx: dict) -> str:
             )
 
     binding = (
-        f"Approve booking: {args['type']} {args['origin']}→{args['destination']} "
-        f"on {args['depart_date']} for {customer['name']} "
-        f"(${float(args['cost']):,.0f})"
+        f"Approve: book {args['type']} "
+        f"{args['origin']}→{args['destination']} {args['depart_date']}"
     )
     err = await _ciba_step_up(ctx, binding)
     if err:
@@ -171,11 +172,7 @@ async def cancel_trip(args: dict, ctx: dict) -> str:
     if trip["status"] == "cancelled":
         return json.dumps({"error": f"trip {args['trip_id']} is already cancelled"})
 
-    binding = (
-        f"Approve cancellation of {trip['type']} "
-        f"{trip['origin']}→{trip['destination']} on {trip['depart_date']} "
-        f"({customer['name'] if customer else trip['customer_id']})"
-    )
+    binding = f"Approve: cancel trip {args['trip_id']}"
     err = await _ciba_step_up(ctx, binding)
     if err:
         return err
@@ -362,7 +359,7 @@ async def create_auth0_organization(args: dict, ctx: dict) -> str:
     if not name:
         return json.dumps({"error": "name is required (lowercase slug, no spaces)."})
 
-    binding = f"Approve creating Auth0 organization: {display_name} ({name})"
+    binding = f"Approve: create org '{name}'"
     err = await _ciba_step_up(ctx, binding)
     if err:
         return err
@@ -402,10 +399,7 @@ async def delete_auth0_organization(args: dict, ctx: dict) -> str:
     if not org:
         return json.dumps({"error": f"no Auth0 organization named '{name}'"})
 
-    binding = (
-        f"Approve DELETING Auth0 organization: "
-        f"{org.get('display_name', name)} ({name})"
-    )
+    binding = f"Approve: DELETE org '{name}'"
     err = await _ciba_step_up(ctx, binding)
     if err:
         return err

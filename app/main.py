@@ -510,7 +510,8 @@ async def companies_create(request: Request, response: Response):
     try:
         await step_up(
             user_sub=ctx.get("sub"),
-            binding_message=f"Approve creating Auth0 organization: {display_name} ({name})",
+            binding_message=f"Approve: create org '{name}'",
+            max_seconds=120,
         )
     except CibaNotEnrolledError:
         return RedirectResponse(
@@ -562,10 +563,8 @@ async def companies_delete(
     try:
         await step_up(
             user_sub=ctx.get("sub"),
-            binding_message=(
-                f"Approve DELETING Auth0 organization: "
-                f"{company['display_name']} ({company['org_name']})"
-            ),
+            binding_message=f"Approve: DELETE org '{company['org_name']}'",
+            max_seconds=120,
         )
     except CibaNotEnrolledError:
         return RedirectResponse(
