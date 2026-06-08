@@ -136,6 +136,18 @@ async def get_organization_by_name(name: str) -> dict | None:
     return resp.json()
 
 
+async def delete_organization(org_id: str) -> None:
+    token = await _get_management_token()
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        resp = await client.delete(
+            f"{_api_base()}/organizations/{org_id}",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+    if resp.status_code in (204, 200):
+        return
+    _raise_for_status(resp, "delete organization")
+
+
 async def list_organization_members(org_id: str) -> list[dict]:
     token = await _get_management_token()
     async with httpx.AsyncClient(timeout=15.0) as client:

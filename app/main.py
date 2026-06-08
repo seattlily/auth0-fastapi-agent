@@ -16,6 +16,7 @@ from openai import AsyncOpenAI
 from starlette.middleware.sessions import SessionMiddleware
 
 from mock_data import (
+    COMPANIES,
     EXPERIENCES,
     TRAVEL_AGENTS,
     TRIPS,
@@ -36,9 +37,11 @@ from permissions import (
     has_any_permission,
     has_permission,
 )
+from tools.auth0_ciba import CibaError, step_up
 from tools.auth0_management import (
     ManagementError,
     create_organization,
+    delete_organization,
     get_organization_by_name,
     list_organization_members,
     reconcile_companies_with_auth0,
@@ -486,6 +489,17 @@ async def companies_create(request: Request, response: Response):
         return RedirectResponse(url="/companies?error=invalid+budget", status_code=303)
 
     try:
+        await step_up(
+            user_sub=ctx.get("sub"),
+            binding_message=f"Approve creating Auth0 organization: {display_name} ({name})",
+        )
+    except CibaError as e:
+        return RedirectResponse(
+            url=f"/companies?error={quote_plus(f'CIBA step-up failed: {e}')}",
+            status_code=303,
+        )
+
+    try:
         org = await create_organization(name=name, display_name=display_name)
     except ManagementError as e:
         return RedirectResponse(
@@ -499,6 +513,58 @@ async def companies_create(request: Request, response: Response):
     )
     return RedirectResponse(
         url=f"/companies?success={quote_plus('Created Auth0 organization ' + org.get('name', name))}",
+        status_code=303,
+    )
+
+
+@app.post("/companies/{company_id}/delete")
+async def companies_delete(
+    request: Request, response: Response, company_id: str
+):
+    user, _, ctx = await require_login(request, response)
+    if not user:
+        return RedirectResponse(url="/auth/login")
+    if not has_permission(ctx, "manage:companies"):
+        return RedirectResponse(url="/dashboard", status_code=303)
+
+    from urllib.parse import quote_plus
+
+    company = get_company(company_id=company_id)
+    if not company:
+        return RedirectResponse(
+            url="/companies?error=company+not+found", status_code=303
+        )
+
+    try:
+        await step_up(
+            user_sub=ctx.get("sub"),
+            binding_message=(
+                f"Approve DELETING Auth0 organization: "
+                f"{company['display_name']} ({company['org_name']})"
+            ),
+        )
+    except CibaError as e:
+        return RedirectResponse(
+            url=f"/companies?error={quote_plus(f'CIBA step-up failed: {e}')}",
+            status_code=303,
+        )
+
+    try:
+        auth0_org = await get_organization_by_name(company["org_name"])
+        if auth0_org:
+            await delete_organization(auth0_org["id"])
+    except ManagementError as e:
+        return RedirectResponse(
+            url=f"/companies?error={quote_plus(str(e))}", status_code=303
+        )
+
+    if company in COMPANIES:
+        COMPANIES.remove(company)
+    return RedirectResponse(
+        url=(
+            f"/companies?success="
+            f"{quote_plus('Deleted organization ' + company['org_name'])}"
+        ),
         status_code=303,
     )
 

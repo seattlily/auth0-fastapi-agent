@@ -45,6 +45,7 @@ def get_user_context(access_token_claims: dict | None, id_token_claims: dict | N
     return {
         "permissions": perms,
         "role": role_for(perms),
+        "sub": it.get("sub") or at.get("sub"),
         "org_id": at.get("org_id") or it.get("org_id"),
         "org_name": (
             at.get("org_name")

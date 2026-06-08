@@ -75,6 +75,31 @@ async def list_companies(args: dict, ctx: dict) -> str:
 # ---------- write tools ----------
 
 
+async def _ciba_step_up(ctx: dict, binding_message: str) -> str | None:
+    """Run CIBA step-up against the signed-in user. Returns None on
+    approval or a JSON error string if step-up fails (so callers can
+    return it directly to the LLM)."""
+    from .auth0_ciba import CibaError, step_up
+
+    sub = ctx.get("sub")
+    if not sub:
+        return json.dumps(
+            {"error": "step-up required but no user sub in token — cannot initiate CIBA"}
+        )
+    try:
+        await step_up(user_sub=sub, binding_message=binding_message)
+    except CibaError as e:
+        return json.dumps(
+            {
+                "error": (
+                    f"Step-up authentication failed: {e}. "
+                    "Approve the prompt on your enrolled device and try again."
+                )
+            }
+        )
+    return None
+
+
 async def book_trip(args: dict, ctx: dict) -> str:
     require(ctx, "book:trips")
     # Agents can only book for customers in their own org; admins can book for anyone.
@@ -86,6 +111,16 @@ async def book_trip(args: dict, ctx: dict) -> str:
             raise PermissionDenied(
                 f"Customer {args['customer_id']} is not in your organization."
             )
+
+    binding = (
+        f"Approve booking: {args['type']} {args['origin']}→{args['destination']} "
+        f"on {args['depart_date']} for {customer['name']} "
+        f"(${float(args['cost']):,.0f})"
+    )
+    err = await _ciba_step_up(ctx, binding)
+    if err:
+        return err
+
     trip = add_trip(
         customer_id=args["customer_id"],
         type=args["type"],
@@ -96,6 +131,33 @@ async def book_trip(args: dict, ctx: dict) -> str:
         cost=float(args["cost"]),
         currency=args.get("currency", "USD"),
     )
+    return json.dumps({"ok": True, "trip": trip})
+
+
+async def cancel_trip(args: dict, ctx: dict) -> str:
+    require(ctx, "book:trips")
+    trip = get_trip(args["trip_id"])
+    if not trip:
+        return json.dumps({"error": f"unknown trip_id: {args['trip_id']}"})
+    customer = get_customer(trip["customer_id"])
+    if not has_permission(ctx, "manage:companies"):
+        if not customer or customer["org_name"] != ctx.get("org_name"):
+            raise PermissionDenied(
+                f"Trip {args['trip_id']} is outside your organization."
+            )
+    if trip["status"] == "cancelled":
+        return json.dumps({"error": f"trip {args['trip_id']} is already cancelled"})
+
+    binding = (
+        f"Approve cancellation of {trip['type']} "
+        f"{trip['origin']}→{trip['destination']} on {trip['depart_date']} "
+        f"({customer['name'] if customer else trip['customer_id']})"
+    )
+    err = await _ciba_step_up(ctx, binding)
+    if err:
+        return err
+
+    trip["status"] = "cancelled"
     return json.dumps({"ok": True, "trip": trip})
 
 
@@ -276,6 +338,12 @@ async def create_auth0_organization(args: dict, ctx: dict) -> str:
     display_name = (args.get("display_name") or name).strip()
     if not name:
         return json.dumps({"error": "name is required (lowercase slug, no spaces)."})
+
+    binding = f"Approve creating Auth0 organization: {display_name} ({name})"
+    err = await _ciba_step_up(ctx, binding)
+    if err:
+        return err
+
     try:
         org = await create_organization(name=name, display_name=display_name)
     except ManagementError as e:
@@ -288,6 +356,49 @@ async def create_auth0_organization(args: dict, ctx: dict) -> str:
         currency=args.get("currency") or "USD",
     )
     return json.dumps({"ok": True, "auth0_org": org, "company": company})
+
+
+async def delete_auth0_organization(args: dict, ctx: dict) -> str:
+    """Delete an Auth0 Organization via the Management API and remove the
+    corresponding entry from the local CompassZero company list."""
+    require(ctx, "manage:companies")
+    from .auth0_management import (
+        ManagementError,
+        delete_organization,
+        get_organization_by_name,
+    )
+
+    name = (args.get("name") or "").strip()
+    if not name:
+        return json.dumps({"error": "name (org slug) is required."})
+
+    try:
+        org = await get_organization_by_name(name)
+    except ManagementError as e:
+        return json.dumps({"error": str(e)})
+    if not org:
+        return json.dumps({"error": f"no Auth0 organization named '{name}'"})
+
+    binding = (
+        f"Approve DELETING Auth0 organization: "
+        f"{org.get('display_name', name)} ({name})"
+    )
+    err = await _ciba_step_up(ctx, binding)
+    if err:
+        return err
+
+    try:
+        await delete_organization(org["id"])
+    except ManagementError as e:
+        return json.dumps({"error": str(e)})
+
+    # Mirror locally — drop matching company.
+    from mock_data import COMPANIES
+
+    for c in list(COMPANIES):
+        if c["org_name"] == name:
+            COMPANIES.remove(c)
+    return json.dumps({"ok": True, "deleted": {"id": org["id"], "name": name}})
 
 
 async def create_customer(args: dict, ctx: dict) -> str:
@@ -418,6 +529,30 @@ TOOLS: dict[str, dict] = {
             },
         },
     },
+    "cancel_trip": {
+        "required_scopes": ("book:trips",),
+        "fn": cancel_trip,
+        "schema": {
+            "type": "function",
+            "function": {
+                "name": "cancel_trip",
+                "description": (
+                    "Cancel an existing booking by setting its status to "
+                    "'cancelled'. Requires CIBA step-up — the user has to "
+                    "approve the cancellation on their enrolled device. "
+                    "Agents can only cancel trips owned by customers in "
+                    "their org; admins can cancel any trip."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "trip_id": {"type": "string", "description": "Trip ID (tr_xxx) to cancel."},
+                    },
+                    "required": ["trip_id"],
+                },
+            },
+        },
+    },
     "book_experience": {
         "required_scopes": ("book:experiences",),
         "fn": book_experience,
@@ -473,8 +608,9 @@ TOOLS: dict[str, dict] = {
                     "AND mirror it into the local CompassZero company list. "
                     "Use this whenever an admin says 'create an organization', "
                     "'add a new company / customer org', 'spin up a tenant for "
-                    "Acme', etc. Admin-only. Requires that the M2M grant for "
-                    "the Auth0 Management API is authorized for this app."
+                    "Acme', etc. Admin-only. Triggers a CIBA push to the "
+                    "admin's enrolled device — they must approve before the "
+                    "org is created."
                 ),
                 "parameters": {
                     "type": "object",
@@ -485,6 +621,32 @@ TOOLS: dict[str, dict] = {
                         "currency":     {"type": "string", "description": "Optional ISO currency code. Default USD."},
                     },
                     "required": ["name", "display_name"],
+                },
+            },
+        },
+    },
+    "delete_auth0_organization": {
+        "required_scopes": ("manage:companies",),
+        "fn": delete_auth0_organization,
+        "schema": {
+            "type": "function",
+            "function": {
+                "name": "delete_auth0_organization",
+                "description": (
+                    "Delete an Auth0 Organization via the Management API and "
+                    "remove the matching local CompassZero company. Use when "
+                    "an admin says 'delete the org for Acme', 'remove the "
+                    "company customer X', etc. Admin-only. Triggers a CIBA "
+                    "push to the admin's device — they must approve the "
+                    "deletion before it executes. Confirm with the user "
+                    "before calling this."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "name": {"type": "string", "description": "Org slug to delete (e.g. 'acme-inc')."},
+                    },
+                    "required": ["name"],
                 },
             },
         },
