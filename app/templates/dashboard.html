@@ -8,6 +8,22 @@
     <span class="muted">{{ ctx.role|replace('_',' ')|title }}{% if ctx.org_name %} · {{ ctx.org_name }}{% endif %}</span>
 </div>
 
+<div class="card" style="padding: 1.25rem 1.5rem;">
+    <div style="display:flex; align-items:center; justify-content:space-between; gap:1rem; margin-bottom:0.85rem; flex-wrap:wrap;">
+        <div>
+            <h2 style="margin-bottom:0.15rem;">AI Assistant</h2>
+            <span class="muted" style="font-size:0.85rem;">{{ visible_tools|length }} tool{{ '' if visible_tools|length == 1 else 's' }} available for your role · streams responses, calls Auth0-permission-gated tools on your behalf</span>
+        </div>
+        <div style="display:flex; gap:0.5rem;">
+            <button type="button" id="clear-chat" class="btn btn-secondary btn-small">Clear chat</button>
+            <a href="/chat" class="btn btn-small">Open full assistant →</a>
+        </div>
+    </div>
+    {% with compact = True %}
+        {% include "_chat_widget.html" %}
+    {% endwith %}
+</div>
+
 {% if ctx.role == 'compass_admin' %}
 
 <div class="card-grid">

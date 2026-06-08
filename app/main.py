@@ -355,7 +355,15 @@ async def dashboard(request: Request, response: Response):
         return RedirectResponse(url="/auth/login")
 
     role = ctx["role"]
-    common = {"user": user, "ctx": ctx}
+    visible_tools = [s["function"]["name"] for s in cz_visible_schemas(ctx)] + [
+        s["function"]["name"] for s in visible_google_schemas(ctx)
+    ]
+    common = {
+        "user": user,
+        "ctx": ctx,
+        "messages": request.session.get("conversation", []),
+        "visible_tools": visible_tools,
+    }
 
     if role == "compass_admin":
         try:
