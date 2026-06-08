@@ -114,16 +114,23 @@ async def initiate_bc_authorize(
     *,
     scope: str = "openid profile",
     audience: str | None = None,
+    requested_expiry: int = 300,
 ) -> dict[str, Any]:
     """Start a CIBA authentication request. Returns auth_req_id,
     expires_in, and the recommended polling interval. The user gets a
-    push on their enrolled device with the binding_message shown."""
+    push on their enrolled device with the binding_message shown.
+
+    requested_expiry asks Auth0 to keep the auth_req_id alive long
+    enough that a human has time to find their phone and approve.
+    Tenants may cap below the request — we read response.expires_in
+    when polling so we never outlive the actual auth_req."""
     body: dict[str, str] = {
         "client_id": _client_id(),
         "client_secret": _client_secret(),
         "login_hint": login_hint,
         "binding_message": truncate_binding(binding_message),
         "scope": scope,
+        "requested_expiry": str(requested_expiry),
     }
     if audience:
         body["audience"] = audience
@@ -193,12 +200,20 @@ async def poll_for_token(
                 current_interval += 1
             if time.time() + current_interval > deadline:
                 raise CibaError(
-                    "CIBA approval timed out — user did not approve in time."
+                    f"Polling timed out after {max_seconds}s without an "
+                    "approve/deny on the device."
                 )
             await asyncio.sleep(current_interval)
             continue
 
-        # Terminal: access_denied, expired_token, invalid_request, etc.
+        # Terminal: access_denied / expired_token / invalid_request / etc.
+        if code == "access_denied":
+            raise CibaError("User denied the request on their device.")
+        if code == "expired_token":
+            raise CibaError(
+                "auth_req_id expired before it was approved — Auth0 push "
+                "may not have been received, or the user took too long."
+            )
         raise CibaError(
             f"CIBA token exchange failed: {code} — "
             f"{err.get('error_description', '')}"
@@ -210,7 +225,7 @@ async def step_up(
     binding_message: str,
     *,
     audience: str | None = None,
-    max_seconds: int = 30,
+    max_seconds: int = 180,
 ) -> dict[str, Any]:
     """One-shot step-up: initiate the CIBA request, then poll until
     the user approves on their device. Returns the resulting token
@@ -228,8 +243,13 @@ async def step_up(
         binding_message=binding_message,
         audience=audience,
     )
+    # Cap the polling deadline by the auth_req's actual expires_in,
+    # minus a small safety margin, so we never poll past the point
+    # where Auth0 would just return expired_token.
+    expires_in = int(init.get("expires_in") or 300)
+    poll_for = min(max_seconds, max(30, expires_in - 5))
     return await poll_for_token(
         init["auth_req_id"],
-        max_seconds=max_seconds,
+        max_seconds=poll_for,
         interval=int(init.get("interval", 2)),
     )

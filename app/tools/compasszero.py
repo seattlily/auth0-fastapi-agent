@@ -91,9 +91,11 @@ async def _ciba_step_up(ctx: dict, binding_message: str) -> str | None:
             }
         )
     try:
-        # Generous timeout so the user has time to find their phone,
-        # read the binding message, and tap Approve.
-        await step_up(user_sub=sub, binding_message=binding_message, max_seconds=120)
+        # 3-minute wait so the user has time to find their phone,
+        # read the binding, and tap Approve. step_up will further
+        # cap at the auth_req's actual expires_in so we never wait
+        # past the point Auth0 would return expired_token.
+        await step_up(user_sub=sub, binding_message=binding_message, max_seconds=180)
     except CibaNotEnrolledError as e:
         return json.dumps(
             {
@@ -115,9 +117,12 @@ async def _ciba_step_up(ctx: dict, binding_message: str) -> str | None:
             {
                 "error": f"Step-up authentication failed: {e}",
                 "next_step": (
-                    "Tell the user the step-up prompt was denied or "
-                    "timed out. Do NOT retry the action automatically — "
-                    "ask them to confirm they want to try again."
+                    "Tell the user the step-up failed and quote the exact "
+                    "reason from the error field above (denied / expired / "
+                    "polling timed out / other). Do NOT retry the action "
+                    "automatically — ask them whether they want to try "
+                    "again, and remind them to keep their phone unlocked "
+                    "and tap Approve in the Auth0 Guardian app."
                 ),
                 "stop_retrying": True,
             }

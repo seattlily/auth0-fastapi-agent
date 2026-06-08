@@ -71,6 +71,21 @@ from tools.google_calendar import (
 from tools.google_gmail import GMAIL_LIST_TOOL_SCHEMA, list_recent_emails
 
 MAX_TOOL_ITERATIONS = 4
+
+# Chat tools that block on a CIBA step-up. The chat stream surfaces
+# a "approve on your device" notice before dispatch so the user
+# knows where the latency is coming from.
+CIBA_GATED_CHAT_TOOLS = {
+    "book_trip",
+    "cancel_trip",
+    "create_auth0_organization",
+    "delete_auth0_organization",
+}
+
+
+def _short_arg(value) -> str:
+    s = str(value)
+    return s if len(s) <= 40 else s[:37] + "…"
 GOOGLE_CONNECTION_SCOPES = [
     "https://www.googleapis.com/auth/calendar.events",
     "https://www.googleapis.com/auth/gmail.readonly",
@@ -910,11 +925,36 @@ async def chat_stream(request: Request, response: Response):
                 )
 
                 for tc in tool_calls_acc.values():
+                    name = tc["name"]
                     try:
                         args = json.loads(tc["arguments"]) if tc["arguments"] else {}
                     except json.JSONDecodeError:
                         args = {}
-                    result = await dispatch_any_tool(tc["name"], args, ctx, refresh_token)
+
+                    status_lines = [f"\n\n_⏺ Calling **{name}**_"]
+                    if args:
+                        arg_repr = ", ".join(
+                            f"`{k}`={_short_arg(v)}" for k, v in args.items()
+                        )
+                        status_lines.append(f"_  → {arg_repr}_")
+                    if name in CIBA_GATED_CHAT_TOOLS:
+                        status_lines.append(
+                            "_  📲 Push notification sent — approve in the "
+                            "Auth0 Guardian app on your phone (waiting up "
+                            "to 3 minutes)..._"
+                        )
+                    yield "\n".join(status_lines) + "\n"
+
+                    result = await dispatch_any_tool(name, args, ctx, refresh_token)
+
+                    is_error = False
+                    try:
+                        parsed = json.loads(result)
+                        is_error = isinstance(parsed, dict) and "error" in parsed
+                    except Exception:
+                        pass
+                    yield f"_  {'✗ failed' if is_error else '✓ done'}_\n\n"
+
                     messages.append(
                         {"role": "tool", "tool_call_id": tc["id"], "content": result}
                     )
