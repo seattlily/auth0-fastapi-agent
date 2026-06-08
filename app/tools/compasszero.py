@@ -158,6 +158,46 @@ async def search_flights(args: dict, ctx: dict) -> str:
     )
 
 
+# ---------- experience catalog (mock) ----------
+
+
+_EXPERIENCE_CATALOG: list[dict] = [
+    {"id": "exc_001", "name": "Tuscan cooking class with a local chef",   "category": "cooking_class", "location": "Florence",   "country": "Italy",        "duration": "4h",  "price": 145, "currency": "USD", "description": "Hands-on small-group class — fresh pasta, sauces, tiramisu — in a 16th-century farmhouse."},
+    {"id": "exc_002", "name": "Tokyo sushi-making workshop",              "category": "cooking_class", "location": "Tokyo",      "country": "Japan",        "duration": "3h",  "price": 110, "currency": "USD", "description": "Learn nigiri and maki technique from a Tsukiji-trained chef in a private kitchen."},
+    {"id": "exc_003", "name": "Bordeaux château wine tasting",            "category": "wine_tasting",  "location": "Bordeaux",   "country": "France",       "duration": "5h",  "price": 220, "currency": "USD", "description": "Visit two grand cru estates with a sommelier guide; six wines, lunch included."},
+    {"id": "exc_004", "name": "Napa Valley wine tour with vineyard lunch","category": "wine_tasting",  "location": "Napa",       "country": "USA",          "duration": "6h",  "price": 285, "currency": "USD", "description": "Three-vineyard tour by private van with a farm-to-table lunch on the second stop."},
+    {"id": "exc_005", "name": "Mt. Fuji day hike",                        "category": "hike",          "location": "Mt. Fuji",   "country": "Japan",        "duration": "10h", "price": 180, "currency": "USD", "description": "Yoshida-trail summit hike with a certified guide; gear and bus transfers included."},
+    {"id": "exc_006", "name": "Cinque Terre coastal hike",                "category": "hike",          "location": "Cinque Terre","country": "Italy",       "duration": "7h",  "price": 95,  "currency": "USD", "description": "Guided trek across the five villages on the high path, with a focaccia stop in Vernazza."},
+    {"id": "exc_007", "name": "Day trip to Versailles",                   "category": "day_trip",      "location": "Versailles", "country": "France",       "duration": "8h",  "price": 130, "currency": "USD", "description": "Round-trip from Paris with skip-the-line palace + gardens entry and an art historian guide."},
+    {"id": "exc_008", "name": "Stonehenge & Bath day trip",               "category": "day_trip",      "location": "Wiltshire",  "country": "United Kingdom","duration": "10h","price": 165, "currency": "USD", "description": "Coach from London with inner-circle Stonehenge access and a walking tour of Bath's Roman baths."},
+    {"id": "exc_009", "name": "Barcelona tapas & wine walk",              "category": "food_tour",     "location": "Barcelona",  "country": "Spain",        "duration": "3h",  "price": 95,  "currency": "USD", "description": "Five-stop tapas crawl through the Gothic Quarter with wine pairings at each."},
+    {"id": "exc_010", "name": "Marrakech medina & souks tour",            "category": "cultural",      "location": "Marrakech",  "country": "Morocco",      "duration": "4h",  "price": 75,  "currency": "USD", "description": "Walking tour of the medina with a local guide; mint tea at a riad to finish."},
+    {"id": "exc_011", "name": "Iceland glacier hike on Sólheimajökull",   "category": "hike",          "location": "Sólheimajökull","country": "Iceland",   "duration": "5h",  "price": 195, "currency": "USD", "description": "Guided ice-axe hike with crampons and helmets provided; transfer from Reykjavík available."},
+    {"id": "exc_012", "name": "West End theatre night, London",           "category": "cultural",      "location": "London",     "country": "United Kingdom","duration": "3h", "price": 140, "currency": "USD", "description": "Premium-stalls ticket to a current West End show plus pre-theatre dinner reservation."},
+]
+
+_EXPERIENCE_CATEGORIES = sorted({e["category"] for e in _EXPERIENCE_CATALOG})
+
+
+async def search_experiences(args: dict, ctx: dict) -> str:
+    require(ctx, "book:experiences")
+    location = (args.get("location") or "").strip().lower()
+    category = (args.get("category") or "").strip().lower()
+
+    out = _EXPERIENCE_CATALOG
+    if location:
+        out = [e for e in out if location in e["location"].lower() or location in e["country"].lower()]
+    if category:
+        out = [e for e in out if e["category"] == category]
+    return json.dumps(
+        {
+            "categories": _EXPERIENCE_CATEGORIES,
+            "match_count": len(out),
+            "experiences": out,
+        }
+    )
+
+
 # ---------- trip drill-down ----------
 
 
@@ -438,6 +478,33 @@ TOOLS: dict[str, dict] = {
                         "email": {"type": "string", "description": "Customer's email address."},
                     },
                     "required": ["name", "email"],
+                },
+            },
+        },
+    },
+    "search_experiences": {
+        "required_scopes": ("book:experiences",),
+        "fn": search_experiences,
+        "schema": {
+            "type": "function",
+            "function": {
+                "name": "search_experiences",
+                "description": (
+                    "Browse a curated catalog of experiences (cooking classes, "
+                    "wine tastings, hikes, day trips, food tours, cultural "
+                    "outings) the agent can add to a customer's trip. Filter "
+                    "by location and/or category, or call with no args to "
+                    "see the whole catalog. After the user picks one, call "
+                    "book_experience with the chosen experience's name, the "
+                    "trip_id, a date inside the trip's window, the price as "
+                    "cost, and the location."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "location": {"type": "string", "description": "Optional city, region, or country to filter by (e.g., 'Florence', 'Japan')."},
+                        "category": {"type": "string", "description": "Optional category. One of: cooking_class, wine_tasting, hike, day_trip, food_tour, cultural."},
+                    },
                 },
             },
         },
