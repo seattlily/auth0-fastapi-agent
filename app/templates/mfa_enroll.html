@@ -13,24 +13,40 @@
 {% endif %}
 
 {% if ticket %}
-<div class="card" style="text-align:center; max-width: 520px; margin: 0 auto;">
-    <h2 style="margin-bottom:0.4rem;">Scan with your phone</h2>
-    <p class="muted" style="font-size:0.92rem; margin-bottom:1.25rem;">
-        Install the <strong>Auth0 Guardian</strong> app from the App Store or Google Play, then scan this QR code to register your device for push approvals.
-    </p>
-    <img
-        src="https://api.qrserver.com/v1/create-qr-code/?data={{ ticket.ticket_url|urlencode }}&size=240x240&margin=8"
-        alt="Auth0 Guardian enrollment QR code"
-        style="display:block; margin:0 auto; border-radius: var(--radius); background: #fff; padding: 0.5rem;"
-        width="240" height="240"
-    >
-    <p class="muted" style="font-size:0.82rem; margin-top:1.25rem;">
-        Or open this URL on your phone manually:
-    </p>
-    <p style="word-break: break-all; margin-top:0.4rem;">
-        <a href="{{ ticket.ticket_url }}" target="_blank" rel="noopener noreferrer" style="font-family: var(--mono); font-size: 0.78rem;">{{ ticket.ticket_url }}</a>
-    </p>
-    <a href="{{ return_to }}" class="btn" style="margin-top:1.5rem;">I've enrolled — go back</a>
+<div class="card" style="max-width: 640px; margin: 0 auto;">
+    <h2 style="margin-bottom:0.4rem;">How to enroll</h2>
+    <ol class="muted" style="font-size:0.92rem; padding-left: 1.25rem; line-height: 1.7;">
+        <li>Install the <strong>Auth0 Guardian</strong> app on your phone (App Store / Google Play).</li>
+        <li>Open the enrollment page below — Auth0 will show a Guardian-specific QR code with the registration secret.</li>
+        <li>Open Guardian on your phone, tap <strong>+</strong> / scan, and point it at <em>that</em> Auth0 QR (not this page's).</li>
+        <li>Come back here and click "I've enrolled — go back".</li>
+    </ol>
+
+    <div style="display:flex; gap:1.5rem; align-items:center; margin-top:1.5rem; flex-wrap:wrap; justify-content:center;">
+        <div style="text-align:center;">
+            <p class="muted" style="font-size:0.78rem; text-transform:uppercase; letter-spacing:0.06em; font-weight:600; margin-bottom:0.5rem;">Open in this browser</p>
+            <a href="{{ ticket.ticket_url }}" target="_blank" rel="noopener noreferrer" class="btn">Open enrollment page →</a>
+        </div>
+        <div style="text-align:center;">
+            <p class="muted" style="font-size:0.78rem; text-transform:uppercase; letter-spacing:0.06em; font-weight:600; margin-bottom:0.5rem;">Or open on phone</p>
+            <img
+                src="https://api.qrserver.com/v1/create-qr-code/?data={{ ticket.ticket_url|urlencode }}&size=180x180&margin=4"
+                alt="QR — scan with your phone's camera (not Guardian) to open the enrollment page"
+                style="display:block; border-radius: var(--radius); background:#fff; padding:0.4rem;"
+                width="180" height="180"
+            >
+            <p class="muted" style="font-size:0.72rem; margin-top:0.4rem;">scan with your phone's camera</p>
+        </div>
+    </div>
+
+    <details style="margin-top:1.5rem; border-top:1px solid var(--border-soft); padding-top:1rem;">
+        <summary class="muted" style="cursor:pointer; font-size:0.82rem; font-weight:600;">Show ticket URL</summary>
+        <p style="word-break:break-all; margin-top:0.6rem;">
+            <code style="font-size:0.78rem;">{{ ticket.ticket_url }}</code>
+        </p>
+    </details>
+
+    <a href="{{ return_to }}" class="btn btn-secondary" style="margin-top:1.5rem; width:100%;">I've enrolled — go back</a>
 </div>
 {% endif %}
 
