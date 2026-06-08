@@ -5,11 +5,27 @@
 {% block content %}
 <div class="page-header">
     <h1>Companies</h1>
-    <span class="muted">{{ companies|length }} total</span>
+    <span class="muted">
+        {{ companies|length }} total
+        {% if sync_status and sync_status.last_sync_at %}
+            · synced {{ sync_status.next_sync_in|round|int }}s remaining until next refresh
+        {% endif %}
+    </span>
 </div>
 
 {% if error %}<div class="alert alert-error"><strong>Error:</strong> {{ error }}</div>{% endif %}
 {% if success %}<div class="alert alert-success"><strong>Success:</strong> {{ success }}</div>{% endif %}
+
+{% if sync and sync.error %}
+<div class="alert alert-error"><strong>Auth0 sync error:</strong> {{ sync.error }} <span class="muted">(showing last known state)</span></div>
+{% elif sync and (sync.added or sync.removed or sync.renamed) %}
+<div class="alert alert-info">
+    <strong>Synced with Auth0:</strong>
+    {% if sync.added %}added {{ sync.added|join(', ') }}.{% endif %}
+    {% if sync.removed %}removed {{ sync.removed|join(', ') }}.{% endif %}
+    {% if sync.renamed %}renamed {{ sync.renamed|join(', ') }}.{% endif %}
+</div>
+{% endif %}
 
 {% if can_manage %}
 <div class="card">

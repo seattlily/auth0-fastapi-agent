@@ -41,6 +41,8 @@ from tools.auth0_management import (
     create_organization,
     get_organization_by_name,
     list_organization_members,
+    reconcile_companies_with_auth0,
+    sync_status,
 )
 from tools.auth0_my_account import (
     MyAccountError,
@@ -356,6 +358,10 @@ async def dashboard(request: Request, response: Response):
     common = {"user": user, "ctx": ctx}
 
     if role == "compass_admin":
+        try:
+            await reconcile_companies_with_auth0()
+        except Exception:
+            pass  # don't block the dashboard on Auth0 sync failure
         companies = get_companies()
         all_trips = get_trips()
         all_customers = get_customers()
@@ -419,6 +425,14 @@ async def companies_page(request: Request, response: Response):
         return RedirectResponse(url="/auth/login")
     if not has_permission(ctx, "read:all_companies"):
         return RedirectResponse(url="/dashboard")
+
+    sync_result: dict | None = None
+    if has_permission(ctx, "manage:companies"):
+        try:
+            sync_result = await reconcile_companies_with_auth0()
+        except Exception as e:
+            sync_result = {"error": f"{type(e).__name__}: {e}"}
+
     companies = get_companies()
     counts = {
         "customers": {c["org_name"]: len(get_customers(org_name=c["org_name"])) for c in companies},
@@ -435,6 +449,8 @@ async def companies_page(request: Request, response: Response):
             "can_manage": has_permission(ctx, "manage:companies"),
             "error": request.query_params.get("error"),
             "success": request.query_params.get("success"),
+            "sync": sync_result,
+            "sync_status": sync_status(),
         },
     )
 

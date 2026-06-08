@@ -13,11 +13,14 @@ under Auth0 Dashboard → APIs → Auth0 Management API → Machine to
 Machine Applications → {your app}.
 """
 
+import asyncio
 import os
 import time
 from typing import Any
 
 import httpx
+
+from mock_data import COMPANIES, add_company
 
 
 class ManagementError(RuntimeError):
@@ -145,3 +148,81 @@ async def list_organization_members(org_id: str) -> list[dict]:
     if isinstance(data, dict):
         return data.get("members") or []
     return data
+
+
+# ---------- local <-> Auth0 sync ----------
+
+SYNC_TTL_SECONDS = 120  # rate-limit reconciliation to once every 2 minutes
+_sync_state: dict[str, Any] = {"last_sync_at": 0.0, "last_result": None}
+_sync_lock = asyncio.Lock()
+
+
+def sync_status() -> dict:
+    now = time.time()
+    last = _sync_state["last_sync_at"]
+    return {
+        "last_sync_at": last,
+        "next_sync_in": max(0, SYNC_TTL_SECONDS - (now - last)) if last else 0,
+        "last_result": _sync_state["last_result"],
+    }
+
+
+async def reconcile_companies_with_auth0(force: bool = False) -> dict:
+    """Pull the live org list from Auth0 and reconcile it with the local
+    COMPANIES mock — add new orgs, drop orgs that no longer exist in
+    Auth0, and refresh display names. Rate-limited via SYNC_TTL_SECONDS.
+    Never raises; sync failures are returned in the result dict so page
+    rendering can continue."""
+    now = time.time()
+    if not force and now - _sync_state["last_sync_at"] < SYNC_TTL_SECONDS:
+        return {"skipped": True, "reason": "rate_limited", **sync_status()}
+
+    async with _sync_lock:
+        # Re-check inside the lock so concurrent requests don't double-sync.
+        now = time.time()
+        if not force and now - _sync_state["last_sync_at"] < SYNC_TTL_SECONDS:
+            return {"skipped": True, "reason": "rate_limited", **sync_status()}
+
+        try:
+            auth0_orgs = await list_organizations()
+        except ManagementError as e:
+            result = {"error": str(e)}
+            _sync_state["last_result"] = result
+            return result
+
+        auth0_by_name = {o["name"]: o for o in auth0_orgs}
+        local_names = {c["org_name"] for c in COMPANIES}
+
+        removed: list[str] = []
+        for c in list(COMPANIES):
+            if c["org_name"] not in auth0_by_name:
+                COMPANIES.remove(c)
+                removed.append(c["org_name"])
+
+        added: list[str] = []
+        for name, org in auth0_by_name.items():
+            if name not in local_names:
+                add_company(
+                    org_name=name,
+                    display_name=org.get("display_name", name),
+                    budget=100_000,
+                )
+                added.append(name)
+
+        renamed: list[str] = []
+        for c in COMPANIES:
+            org = auth0_by_name.get(c["org_name"])
+            if org and org.get("display_name") and org["display_name"] != c["display_name"]:
+                c["display_name"] = org["display_name"]
+                renamed.append(c["org_name"])
+
+        result = {
+            "added": added,
+            "removed": removed,
+            "renamed": renamed,
+            "auth0_total": len(auth0_orgs),
+            "synced_at": now,
+        }
+        _sync_state["last_sync_at"] = now
+        _sync_state["last_result"] = result
+        return result
