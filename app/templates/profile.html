@@ -26,9 +26,18 @@
     {% endif %}
 </section>
 
-<div class="token-grid">
-    <section class="token-section">
-        <h3>ID Token <span class="kind-pill">JWS</span></h3>
+<div class="tabs" role="tablist">
+    <button type="button" class="tab-btn active" role="tab" data-target="tab-id-token">
+        ID Token <span class="kind-pill">JWS</span>
+    </button>
+    <button type="button" class="tab-btn" role="tab" data-target="tab-access-token">
+        Access Token <span class="kind-pill {{ access_token_kind }}">{{ access_token_kind|upper }}</span>
+    </button>
+</div>
+
+<section id="tab-id-token" class="tab-panel active" role="tabpanel">
+    <div class="token-section">
+        <h3>ID Token claims</h3>
         {% if id_token_claims %}
         <table class="claims-table">
             {% for key, value in id_token_claims.items() %}
@@ -54,13 +63,12 @@
             <pre class="token-raw">{{ id_token }}</pre>
         </details>
         {% endif %}
-    </section>
+    </div>
+</section>
 
-    <section class="token-section">
-        <h3>
-            Access Token
-            <span class="kind-pill {{ access_token_kind }}">{{ access_token_kind|upper }}</span>
-        </h3>
+<section id="tab-access-token" class="tab-panel" role="tabpanel">
+    <div class="token-section">
+        <h3>Access Token claims</h3>
         {% if access_token_kind == "jws" and access_token_claims %}
         <table class="claims-table">
             {% for key, value in access_token_claims.items() %}
@@ -71,12 +79,12 @@
             {% endfor %}
         </table>
         {% elif access_token_kind == "jwe" %}
-        <p class="muted" style="font-size:0.88rem;">
+        <p class="muted">
             JWE-encrypted ({{ access_token_header.alg or "?" }} / {{ access_token_header.enc or "?" }}).
             The payload is decrypted by Auth0 at API edges; inner claims aren't viewable client-side.
         </p>
         {% elif access_token_kind == "opaque" %}
-        <p class="muted" style="font-size:0.88rem;">
+        <p class="muted">
             Opaque token. Set <code>AUTH0_AUDIENCE=https://compasszero.api</code> in <code>.env</code> to get a signed JWT with viewable claims.
         </p>
         {% else %}
@@ -96,6 +104,22 @@
             <pre class="token-raw">{{ access_token }}</pre>
         </details>
         {% endif %}
-    </section>
-</div>
+    </div>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(() => {
+    const tabs = document.querySelectorAll('.tab-btn');
+    const panels = document.querySelectorAll('.tab-panel');
+    tabs.forEach((btn) => {
+        btn.addEventListener('click', () => {
+            const target = btn.dataset.target;
+            tabs.forEach((b) => b.classList.toggle('active', b === btn));
+            panels.forEach((p) => p.classList.toggle('active', p.id === target));
+        });
+    });
+})();
+</script>
 {% endblock %}
