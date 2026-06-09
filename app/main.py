@@ -149,6 +149,16 @@ templates = Jinja2Templates(directory="templates")
 # Cache-bust static assets on every restart so template/CSS changes
 # show up without needing a hard refresh.
 templates.env.globals["static_version"] = str(int(time.time()))
+# Optional Auth0 connection name for staff / admin SSO (e.g. "Okta").
+# When set, the home page shows a secondary "Sign in via {name}"
+# link that bypasses the connection picker and hits the IdP
+# directly — no org param, so the admin lands without org context.
+templates.env.globals["admin_connection_name"] = os.environ.get(
+    "ADMIN_CONNECTION_NAME", ""
+)
+templates.env.globals["admin_connection_label"] = os.environ.get(
+    "ADMIN_CONNECTION_LABEL", "Okta"
+)
 
 
 # ---------- Auth0 SDK setup ----------
