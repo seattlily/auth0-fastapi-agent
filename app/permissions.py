@@ -42,9 +42,22 @@ def get_user_context(access_token_claims: dict | None, id_token_claims: dict | N
     at = access_token_claims or {}
     it = id_token_claims or {}
     perms = set(at.get("permissions") or [])
+    role = role_for(perms)
+    # If RBAC didn't pin a role (e.g. Okta SSO admins who haven't been
+    # assigned the compass_admin Auth0 Role yet), fall back to a custom
+    # claim that an Auth0 Action can stamp onto the token from
+    # app_metadata.role. Lets the Okta-only flow work without RBAC set up.
+    if role == "unknown":
+        claim_role = (
+            at.get(NAMESPACE + "role")
+            or it.get(NAMESPACE + "role")
+            or ""
+        )
+        if claim_role in ("compass_admin", "travel_agent", "customer"):
+            role = claim_role
     return {
         "permissions": perms,
-        "role": role_for(perms),
+        "role": role,
         "sub": it.get("sub") or at.get("sub"),
         "org_id": at.get("org_id") or it.get("org_id"),
         "org_name": (
