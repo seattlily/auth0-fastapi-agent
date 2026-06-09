@@ -143,8 +143,8 @@ async def book_trip(args: dict, ctx: dict) -> str:
             )
 
     binding = (
-        f"Approve: book {args['type']} "
-        f"{args['origin']}→{args['destination']} {args['depart_date']}"
+        f"Approve booking {args['type']} "
+        f"{args['origin']} to {args['destination']} {args['depart_date']}"
     )
     err = await _ciba_step_up(ctx, binding)
     if err:
@@ -177,7 +177,7 @@ async def cancel_trip(args: dict, ctx: dict) -> str:
     if trip["status"] == "cancelled":
         return json.dumps({"error": f"trip {args['trip_id']} is already cancelled"})
 
-    binding = f"Approve: cancel trip {args['trip_id']}"
+    binding = f"Approve cancelling trip {args['trip_id']}"
     err = await _ciba_step_up(ctx, binding)
     if err:
         return err
@@ -364,7 +364,7 @@ async def create_auth0_organization(args: dict, ctx: dict) -> str:
     if not name:
         return json.dumps({"error": "name is required (lowercase slug, no spaces)."})
 
-    binding = f"Approve: create org '{name}'"
+    binding = f"Approve creating organization {name}"
     err = await _ciba_step_up(ctx, binding)
     if err:
         return err
@@ -404,7 +404,7 @@ async def delete_auth0_organization(args: dict, ctx: dict) -> str:
     if not org:
         return json.dumps({"error": f"no Auth0 organization named '{name}'"})
 
-    binding = f"Approve: DELETE org '{name}'"
+    binding = f"Approve DELETING organization {name}"
     err = await _ciba_step_up(ctx, binding)
     if err:
         return err

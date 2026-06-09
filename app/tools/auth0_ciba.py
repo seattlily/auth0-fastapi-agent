@@ -20,6 +20,7 @@ Reference:
 import asyncio
 import json
 import os
+import re
 import time
 from typing import Any
 
@@ -31,14 +32,27 @@ LOGIN_HINT_FORMAT = "iss_sub"
 BINDING_MESSAGE_MAX = 64  # Auth0's hard cap on binding_message length
 
 
-def truncate_binding(message: str) -> str:
-    """Auth0 rejects binding_message values longer than 64 characters
-    with 'binding message should not exceed 64 characters'. Trim to
-    fit, with an ellipsis when we have to cut."""
+_BINDING_DISALLOWED = re.compile(r"[^A-Za-z0-9 \-_.]")
+
+
+def sanitize_binding(message: str) -> str:
+    """Auth0's /bc-authorize rejects binding_message values that contain
+    anything outside a small allowed set ("can only contain
+    alphanumerics, whitespace and characters"). The auth0-assistant0
+    sample sticks to pure alphanumerics + spaces; we allow that plus
+    -, _, . because they show up naturally in slugs and dates.
+    Anything else gets replaced with a space, runs of whitespace are
+    collapsed, and the result is hard-capped at 64 chars."""
     s = (message or "").strip()
-    if len(s) <= BINDING_MESSAGE_MAX:
-        return s
-    return s[: BINDING_MESSAGE_MAX - 1].rstrip() + "…"
+    s = _BINDING_DISALLOWED.sub(" ", s)
+    s = re.sub(r"\s+", " ", s).strip()
+    if len(s) > BINDING_MESSAGE_MAX:
+        s = s[:BINDING_MESSAGE_MAX].rstrip()
+    return s
+
+
+# Backwards-compat alias — we used to only enforce the length cap.
+truncate_binding = sanitize_binding
 
 # Auth0 error codes / phrases that indicate the user has no enrolled
 # push factor (Auth0 Guardian app) and therefore cannot complete CIBA.
@@ -128,7 +142,7 @@ async def initiate_bc_authorize(
         "client_id": _client_id(),
         "client_secret": _client_secret(),
         "login_hint": login_hint,
-        "binding_message": truncate_binding(binding_message),
+        "binding_message": sanitize_binding(binding_message),
         "scope": scope,
         "requested_expiry": str(requested_expiry),
     }

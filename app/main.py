@@ -525,7 +525,7 @@ async def companies_create(request: Request, response: Response):
     try:
         await step_up(
             user_sub=ctx.get("sub"),
-            binding_message=f"Approve: create org '{name}'",
+            binding_message=f"Approve creating organization {name}",
             max_seconds=120,
         )
     except CibaNotEnrolledError:
@@ -578,7 +578,7 @@ async def companies_delete(
     try:
         await step_up(
             user_sub=ctx.get("sub"),
-            binding_message=f"Approve: DELETE org '{company['org_name']}'",
+            binding_message=f"Approve DELETING organization {company['org_name']}",
             max_seconds=120,
         )
     except CibaNotEnrolledError:
