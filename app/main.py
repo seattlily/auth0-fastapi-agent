@@ -77,6 +77,7 @@ MAX_TOOL_ITERATIONS = 4
 # knows where the latency is coming from.
 CIBA_GATED_CHAT_TOOLS = {
     "book_trip",
+    "book_customer_experience",
     "cancel_trip",
     "create_auth0_organization",
     "delete_auth0_organization",

@@ -173,15 +173,17 @@ def add_trip(
 
 def add_experience(
     customer_id: str,
-    trip_id: str,
     name: str,
     date: str,
     cost: float,
+    trip_id: str = "",
     location: str = "",
 ) -> dict:
     if not get_customer(customer_id):
         raise ValueError(f"Unknown customer_id: {customer_id}")
-    if not get_trip(trip_id):
+    # trip_id is optional — standalone activities (e.g. a one-off
+    # cooking class) don't have to be attached to a flight/trip.
+    if trip_id and not get_trip(trip_id):
         raise ValueError(f"Unknown trip_id: {trip_id}")
     experience = {
         "id": _next_id("ex_", EXPERIENCES),

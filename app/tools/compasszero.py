@@ -342,6 +342,39 @@ async def book_experience(args: dict, ctx: dict) -> str:
     return json.dumps({"ok": True, "experience": experience})
 
 
+async def book_customer_experience(args: dict, ctx: dict) -> str:
+    """Book a standalone experience for a customer with no flight
+    attached — e.g. a one-off cooking class or wine tasting that
+    isn't part of a trip booking."""
+    require(ctx, "book:experiences")
+    customer = get_customer(args["customer_id"])
+    if not customer:
+        return json.dumps(
+            {"error": f"unknown customer_id: {args['customer_id']}"}
+        )
+    if not has_permission(ctx, "manage:companies"):
+        if customer["org_name"] != ctx.get("org_name"):
+            raise PermissionDenied(
+                f"Customer {args['customer_id']} is not in your organization."
+            )
+
+    binding = (
+        f"Approve booking activity for customer {args['customer_id']}"
+    )
+    err = await _ciba_step_up(ctx, binding)
+    if err:
+        return err
+
+    experience = add_experience(
+        customer_id=args["customer_id"],
+        name=args["name"],
+        date=args["date"],
+        cost=float(args["cost"]),
+        location=args.get("location", ""),
+    )
+    return json.dumps({"ok": True, "experience": experience})
+
+
 async def create_company(args: dict, ctx: dict) -> str:
     require(ctx, "manage:companies")
     company = add_company(
@@ -582,7 +615,15 @@ TOOLS: dict[str, dict] = {
             "type": "function",
             "function": {
                 "name": "book_experience",
-                "description": "Add an experience (tour / activity / dinner reservation) to an existing trip. Agents can only book for trips owned by customers in their org.",
+                "description": (
+                    "Attach an experience (tour / activity / dinner "
+                    "reservation) to an EXISTING trip. Use this when the "
+                    "user already has a flight/trip on file and wants to "
+                    "add an activity to it. For a standalone activity with "
+                    "no flight, use book_customer_experience instead. "
+                    "Agents can only book for trips owned by customers in "
+                    "their org."
+                ),
                 "parameters": {
                     "type": "object",
                     "properties": {
@@ -593,6 +634,39 @@ TOOLS: dict[str, dict] = {
                         "location": {"type": "string", "description": "City or venue."},
                     },
                     "required": ["trip_id", "name", "date", "cost"],
+                },
+            },
+        },
+    },
+    "book_customer_experience": {
+        "required_scopes": ("book:experiences",),
+        "fn": book_customer_experience,
+        "schema": {
+            "type": "function",
+            "function": {
+                "name": "book_customer_experience",
+                "description": (
+                    "Book a STANDALONE experience for a customer with NO "
+                    "flight/trip attached — e.g. a one-off cooking class, "
+                    "wine tasting, or day trip the agent wants to add for "
+                    "the customer without a parent trip. Use this whenever "
+                    "the user says 'book a cooking class for Jane', 'add "
+                    "a wine tasting for cu_xxx', etc., and there's no trip "
+                    "to attach it to. Agents can only book for customers "
+                    "in their own org. Triggers a CIBA push to the agent's "
+                    "enrolled device — they must approve before the "
+                    "booking is created."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "customer_id": {"type": "string", "description": "Customer ID (cu_xxx)."},
+                        "name":        {"type": "string", "description": "Experience name (e.g., 'Tuscan cooking class')."},
+                        "date":        {"type": "string", "description": "Date YYYY-MM-DD."},
+                        "cost":        {"type": "number", "description": "Cost."},
+                        "location":    {"type": "string", "description": "City or venue."},
+                    },
+                    "required": ["customer_id", "name", "date", "cost"],
                 },
             },
         },
