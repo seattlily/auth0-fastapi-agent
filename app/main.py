@@ -203,6 +203,9 @@ def _relax_cookies_for_local_http(client) -> None:
                 raise ValueError("Response object is required in store options.")
             response = options["response"]
             encrypted_value = self.encrypt(identifier, value.model_dump())
+            # 10-minute TTL so MFA / Guardian enrollment / SSO redirects
+            # have plenty of time before the transaction cookie expires
+            # and the callback fails state validation.
             response.set_cookie(
                 key=self.cookie_name,
                 value=encrypted_value,
@@ -210,7 +213,7 @@ def _relax_cookies_for_local_http(client) -> None:
                 samesite="lax",
                 secure=False,
                 httponly=True,
-                max_age=60,
+                max_age=600,
             )
 
         transaction_store.set = types.MethodType(_set_no_secure, transaction_store)
