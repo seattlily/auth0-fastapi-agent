@@ -383,10 +383,12 @@ async def dashboard(request: Request, response: Response):
         s["function"]["name"] for s in visible_google_schemas(ctx)
     ]
 
-    # Surface a one-shot enrollment nudge — admin-only so the banner
-    # doesn't appear on agent / customer dashboards.
+    # Surface a one-shot enrollment nudge for any role whose actions
+    # trigger CIBA — admins (org create/delete) and travel agents
+    # (book/cancel trip). Customers don't have CIBA-gated actions, so
+    # skip the lookup for them.
     needs_enrollment = False
-    if role == "compass_admin":
+    if role in ("compass_admin", "travel_agent"):
         user_sub = ctx.get("sub") or user.get("sub")
         if user_sub:
             try:
@@ -784,12 +786,12 @@ async def profile(request: Request, response: Response):
     )
     id_token_header = decode_jwt_header(id_token) if id_token else {}
 
-    # Enrollment status section is admin-only; skip the API call for
-    # other roles to keep the page cheap and avoid surfacing the
-    # section to users who don't trigger CIBA-gated UI actions.
+    # Enrollment status section: any role whose actions are CIBA-gated
+    # (admins + travel agents) — skip for customers, who don't have
+    # CIBA-gated tools and don't need to see the section.
     enrollments: list[dict] = []
     enrollment_error: str | None = None
-    show_enrollment_section = ctx.get("role") == "compass_admin"
+    show_enrollment_section = ctx.get("role") in ("compass_admin", "travel_agent")
     if show_enrollment_section:
         user_sub = ctx.get("sub") or user.get("sub")
         if user_sub:
