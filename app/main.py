@@ -294,6 +294,14 @@ async def require_login(request: Request, response: Response) -> tuple[dict, dic
     access_claims = decode_jwt_claims(access_token)
     ctx = get_user_context(access_claims, user or {})
 
+    # Resolve the user's company so templates can show the company
+    # display_name as the primary brand instead of CompassZero.
+    org = ctx.get("org_name")
+    if org:
+        company = get_company(org_name=org)
+        if company:
+            ctx["company_display_name"] = company["display_name"]
+
     # Per-user app-state isolation: Starlette's SessionMiddleware cookie
     # is independent of the SDK's session, so app state (conversation,
     # pending_connect) survives a logout. Reset whenever the signed-in

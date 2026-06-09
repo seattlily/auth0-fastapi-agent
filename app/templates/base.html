@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{% block title %}CompassZero{% endblock %}</title>
+    <title>{% if ctx and ctx.company_display_name %}{{ ctx.company_display_name }} · {% endif %}{% block title %}CompassZero{% endblock %}</title>
     <link rel="stylesheet" href="/static/style.css?v={{ static_version }}">
     {% block head_extra %}{% endblock %}
 </head>
@@ -11,7 +11,13 @@
     {% if user %}
     <nav class="topnav">
         <div class="topnav-inner">
-            <a class="brand" href="/dashboard">Compass<span class="compass">Zero</span></a>
+            <a class="brand" href="/dashboard">
+                {% if ctx and ctx.company_display_name %}
+                {{ ctx.company_display_name }}<small style="margin-left:0.4rem; font-size:0.62rem; font-weight:600; color:var(--muted); letter-spacing:0.08em; text-transform:uppercase;">on CompassZero</small>
+                {% else %}
+                Compass<span class="compass">Zero</span>
+                {% endif %}
+            </a>
             <div class="nav-links">
                 <a href="/dashboard" {% if active=='dashboard' %}class="active"{% endif %}>Dashboard</a>
                 {% set perms = ctx.permissions or [] %}

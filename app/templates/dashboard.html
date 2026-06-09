@@ -5,7 +5,7 @@
 {% block content %}
 <div class="page-header">
     <h1>Welcome back, {{ user.given_name or user.name or user.email }}</h1>
-    <span class="muted">{{ ctx.role|replace('_',' ')|title }}{% if ctx.org_name %} · {{ ctx.org_name }}{% endif %}</span>
+    <span class="muted">{{ ctx.role|replace('_',' ')|title }}{% if ctx.company_display_name %} · {{ ctx.company_display_name }}{% elif ctx.org_name %} · {{ ctx.org_name }}{% endif %}</span>
 </div>
 
 {% if needs_enrollment %}
