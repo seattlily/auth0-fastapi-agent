@@ -29,6 +29,15 @@
         {% endif %}
     </div>
 
+    {% if ctx and ctx.role == 'compass_admin' and not messages %}
+    <div class="prompt-chips" aria-label="Suggested prompts">
+        <span class="prompt-chips-label">Try:</span>
+        <button type="button" class="prompt-chip" data-prompt="Create a new company called ">Create a new company</button>
+        <button type="button" class="prompt-chip" data-prompt="Add a new travel agent ">Add a new agent</button>
+        <button type="button" class="prompt-chip" data-prompt="List agencies with the most spend">List agencies with most spend</button>
+    </div>
+    {% endif %}
+
     <form id="chat-form" method="post" action="/chat" class="chat-form">
         <input id="chat-input" type="text" name="message" placeholder="Ask about trips, customers, or book something..." autocomplete="off" required>
         <button type="submit" class="btn">Send</button>
@@ -57,6 +66,17 @@ document.querySelectorAll('.message.assistant .content').forEach((el) => {
     const input = document.getElementById('chat-input');
     const messages = document.getElementById('messages');
     const clearBtn = document.getElementById('clear-chat');
+
+    document.querySelectorAll('.prompt-chip').forEach((chip) => {
+        chip.addEventListener('click', () => {
+            const prefill = chip.dataset.prompt || chip.textContent.trim();
+            input.value = prefill;
+            input.focus();
+            // Move caret to end so the user can keep typing.
+            const pos = input.value.length;
+            input.setSelectionRange(pos, pos);
+        });
+    });
 
     if (clearBtn) {
         clearBtn.addEventListener('click', async () => {

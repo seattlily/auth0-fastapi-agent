@@ -382,6 +382,35 @@ table tbody tr:hover { background: var(--surface-alt); }
 .message .content pre { background: var(--surface); padding: 0.7rem 0.95rem; border-radius: var(--radius-sm); margin: 0.5rem 0; border: 1px solid var(--border-soft); }
 .message .content pre code { background: transparent; border: none; padding: 0; }
 
+.prompt-chips {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.45rem;
+    margin-bottom: 0.85rem;
+}
+.prompt-chips-label {
+    color: var(--muted);
+    font-size: 0.78rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    margin-right: 0.15rem;
+}
+.prompt-chip {
+    background: var(--surface-alt);
+    border: 1px solid var(--border-soft);
+    border-radius: var(--radius-pill);
+    padding: 0.4rem 0.85rem;
+    font-family: var(--font);
+    font-size: 0.82rem;
+    color: var(--text);
+    cursor: pointer;
+    transition: background 120ms ease, border-color 120ms ease, color 120ms ease;
+    line-height: 1.2;
+}
+.prompt-chip:hover { background: var(--brand-soft); border-color: var(--brand); color: var(--brand-dark); }
+
 .chat-form { display: flex; gap: 0.6rem; }
 .chat-form input {
     flex: 1;
