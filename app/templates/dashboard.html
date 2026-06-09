@@ -111,24 +111,27 @@
 
 <div class="card">
     <h2>Recent bookings</h2>
-    {% if trips %}
+    {% if bookings %}
     <table>
-        <thead><tr><th>Trip</th><th>Customer</th><th>Route</th><th>Dates</th><th>Cost</th><th>Status</th></tr></thead>
+        <thead><tr><th>Booking</th><th>Customer</th><th>Where</th><th>When</th><th>Cost</th><th>Status</th></tr></thead>
         <tbody>
-        {% for t in trips[:8] %}
+        {% for b in bookings[:10] %}
             <tr>
-                <td><a href="/trips/{{ t.id }}"><code>{{ t.id }}</code></a> · {{ t.type }}</td>
-                <td>{{ customer_names.get(t.customer_id, t.customer_id) }}</td>
-                <td>{{ t.origin }} → {{ t.destination }}</td>
-                <td>{{ t.depart_date }} – {{ t.return_date }}</td>
-                <td>{{ t.currency }} {{ '{:,.0f}'.format(t.cost) }}</td>
-                <td><span class="status-badge {{ t.status }}">{{ t.status }}</span></td>
+                <td>
+                    {% if b.link %}<a href="{{ b.link }}"><code>{{ b.id }}</code></a>{% else %}<code>{{ b.id }}</code>{% endif %}
+                    · {{ b.type }}
+                </td>
+                <td>{{ customer_names.get(b.customer_id, b.customer_id) }}</td>
+                <td>{{ b.summary }}{% if b.location and b.kind == 'experience' %} <span class="muted">({{ b.location }})</span>{% endif %}</td>
+                <td>{{ b.date_label }}</td>
+                <td>{{ b.currency }} {{ '{:,.0f}'.format(b.cost) }}</td>
+                <td><span class="status-badge {{ b.status }}">{{ b.status }}</span></td>
             </tr>
         {% endfor %}
         </tbody>
     </table>
     {% else %}
-    <p class="muted">No bookings yet. Use the AI assistant to book a trip.</p>
+    <p class="muted">No bookings yet. Use the AI assistant to book a trip or activity.</p>
     {% endif %}
 </div>
 
@@ -141,31 +144,34 @@
         <div class="kpi-value" style="font-size:1.2rem">{{ my_company.display_name }}</div>
     </div>
     <div class="kpi">
-        <div class="kpi-label">Trips booked for you</div>
-        <div class="kpi-value">{{ kpi.my_trips }}</div>
+        <div class="kpi-label">Bookings on file</div>
+        <div class="kpi-value">{{ kpi.my_bookings }}</div>
     </div>
 </div>
 {% endif %}
 
 <div class="card">
-    <h2>Your trips</h2>
-    {% if trips %}
+    <h2>Your bookings</h2>
+    {% if bookings %}
     <table>
-        <thead><tr><th>Trip</th><th>Route</th><th>Dates</th><th>Cost</th><th>Status</th></tr></thead>
+        <thead><tr><th>Booking</th><th>Where</th><th>When</th><th>Cost</th><th>Status</th></tr></thead>
         <tbody>
-        {% for t in trips %}
+        {% for b in bookings %}
             <tr>
-                <td><a href="/trips/{{ t.id }}"><code>{{ t.id }}</code></a> · {{ t.type }}</td>
-                <td>{{ t.origin }} → {{ t.destination }}</td>
-                <td>{{ t.depart_date }} – {{ t.return_date }}</td>
-                <td>{{ t.currency }} {{ '{:,.0f}'.format(t.cost) }}</td>
-                <td><span class="status-badge {{ t.status }}">{{ t.status }}</span></td>
+                <td>
+                    {% if b.link %}<a href="{{ b.link }}"><code>{{ b.id }}</code></a>{% else %}<code>{{ b.id }}</code>{% endif %}
+                    · {{ b.type }}
+                </td>
+                <td>{{ b.summary }}{% if b.location and b.kind == 'experience' %} <span class="muted">({{ b.location }})</span>{% endif %}</td>
+                <td>{{ b.date_label }}</td>
+                <td>{{ b.currency }} {{ '{:,.0f}'.format(b.cost) }}</td>
+                <td><span class="status-badge {{ b.status }}">{{ b.status }}</span></td>
             </tr>
         {% endfor %}
         </tbody>
     </table>
     {% else %}
-    <p class="muted">No trips on file. Reach out to your travel agent to get booked.</p>
+    <p class="muted">Nothing on file yet. Reach out to your travel agent to get booked.</p>
     {% endif %}
 </div>
 

@@ -87,6 +87,48 @@ CIBA_GATED_CHAT_TOOLS = {
 def _short_arg(value) -> str:
     s = str(value)
     return s if len(s) <= 40 else s[:37] + "…"
+
+
+def _build_bookings(trips: list[dict], experiences: list[dict]) -> list[dict]:
+    """Merge trips and standalone/attached experiences into one
+    chronological feed for the dashboard's recent-bookings table."""
+    bookings: list[dict] = []
+    for t in trips:
+        bookings.append(
+            {
+                "id": t["id"],
+                "kind": "trip",
+                "type": t["type"],
+                "customer_id": t["customer_id"],
+                "summary": f"{t['origin']} → {t['destination']}",
+                "primary_date": t["depart_date"],
+                "date_label": f"{t['depart_date']} – {t['return_date']}",
+                "cost": t["cost"],
+                "currency": t["currency"],
+                "status": t["status"],
+                "link": f"/trips/{t['id']}",
+                "location": "",
+            }
+        )
+    for e in experiences:
+        bookings.append(
+            {
+                "id": e["id"],
+                "kind": "experience",
+                "type": "activity",
+                "customer_id": e["customer_id"],
+                "summary": e["name"],
+                "primary_date": e["date"],
+                "date_label": e["date"],
+                "cost": e["cost"],
+                "currency": "USD",
+                "status": "booked",
+                "link": (f"/trips/{e['trip_id']}" if e.get("trip_id") else None),
+                "location": e.get("location", ""),
+            }
+        )
+    bookings.sort(key=lambda b: b["primary_date"], reverse=True)
+    return bookings
 GOOGLE_CONNECTION_SCOPES = [
     "https://www.googleapis.com/auth/calendar.events",
     "https://www.googleapis.com/auth/gmail.readonly",
@@ -432,14 +474,16 @@ async def dashboard(request: Request, response: Response):
         trips = get_trips(org_name=org) if org else []
         customers = get_customers(org_name=org) if org else []
         customer_names = {c["id"]: c["name"] for c in customers}
-        trips_sorted = sorted(trips, key=lambda t: t["depart_date"], reverse=True)
+        customer_ids = {c["id"] for c in customers}
+        experiences = [e for e in EXPERIENCES if e["customer_id"] in customer_ids]
+        bookings = _build_bookings(trips, experiences)
         return templates.TemplateResponse(
             request=request,
             name="dashboard.html",
             context={
                 **common,
                 "my_company": my_company,
-                "trips": trips_sorted,
+                "bookings": bookings,
                 "kpi": {"customers": len(customers)},
                 "customer_names": customer_names,
             },
@@ -449,15 +493,22 @@ async def dashboard(request: Request, response: Response):
         customer_id = ctx.get("customer_id")
         org = ctx.get("org_name")
         my_company = get_company(org_name=org) if org else None
-        trips = sorted(
-            get_trips(customer_id=customer_id) if customer_id else [],
-            key=lambda t: t["depart_date"],
-            reverse=True,
+        trips = get_trips(customer_id=customer_id) if customer_id else []
+        experiences = (
+            [e for e in EXPERIENCES if e["customer_id"] == customer_id]
+            if customer_id
+            else []
         )
+        bookings = _build_bookings(trips, experiences)
         return templates.TemplateResponse(
             request=request,
             name="dashboard.html",
-            context={**common, "my_company": my_company, "trips": trips, "kpi": {"my_trips": len(trips)}},
+            context={
+                **common,
+                "my_company": my_company,
+                "bookings": bookings,
+                "kpi": {"my_bookings": len(bookings)},
+            },
         )
 
     # role == "unknown"
