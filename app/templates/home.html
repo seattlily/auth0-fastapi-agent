@@ -3,14 +3,30 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AI Chat Assistant</title>
+    <title>CompassZero</title>
     <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
-    <div class="container home">
-        <h1>AI Chat Assistant</h1>
-        <p>A conversational AI assistant powered by Claude. Log in to start chatting.</p>
-        <a href="/login" class="btn">Login with Auth0</a>
+    <div class="landing">
+        <h1>Compass<span class="compass">Zero</span></h1>
+        <p>Travel management for B2B teams. Book on behalf of customers, track organization budgets, and let an AI agent handle the busywork — all under permission scopes you control in Auth0.</p>
+        <a href="/auth/login" class="btn">Sign in</a>
+        {% if admin_connection_name %}
+        <p style="margin-top: 1rem; font-size: 0.88rem;">
+            <a href="/auth/login?connection={{ admin_connection_name }}" style="color: var(--muted);">CompassZero staff? Sign in via {{ admin_connection_label }} →</a>
+        </p>
+        {% endif %}
+
+        <div class="features">
+            <div class="feature">
+                <h3>Travel agents</h3>
+                <p>Book trips and experiences for your customers. See your organization's budget at a glance.</p>
+            </div>
+            <div class="feature">
+                <h3>Travelers</h3>
+                <p>View your itinerary and ask the assistant for details about upcoming bookings.</p>
+            </div>
+        </div>
     </div>
 </body>
 </html>
