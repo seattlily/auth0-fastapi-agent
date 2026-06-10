@@ -89,6 +89,52 @@ MAX_TOOL_ITERATIONS = 4
 # Chat tools that block on a CIBA step-up. The chat stream surfaces
 # a "approve on your device" notice before dispatch so the user
 # knows where the latency is coming from.
+# Per-org visual overrides — when set, the user's templates render with
+# a different primary/accent and an org-supplied logo next to the brand
+# mark. Demonstrates per-tenant theming on top of Auth0 Organizations.
+# Keys may be either Auth0 `org_id` (e.g. "org_aGUHzOkqG9Volr3d") or
+# the org slug `org_name` (e.g. "globex-ltd"). The runtime lookup
+# checks org_id first, then org_name — so a recreated Auth0 org with
+# a new id still finds its theme as long as one of them matches.
+BRAND_OVERRIDES: dict[str, dict[str, str]] = {
+    "globex-ltd": {
+        "primary": "#9dd600",
+        "primary_dark": "#7db300",
+        "primary_soft": "#eefadf",
+        "secondary": "#7dc2d8",
+        "secondary_soft": "#e6f4f9",
+        "logo_url": (
+            "https://img.magnific.com/free-vector/"
+            "globe-grid-earth_78370-7981.jpg?w=360"
+        ),
+    },
+    "northwind-corp": {
+        "primary": "#030a2b",
+        "primary_dark": "#020618",
+        "primary_soft": "#e6e8ee",
+        "secondary": "#565252",
+        "secondary_soft": "#ececec",
+        "logo_url": (
+            "https://media.istockphoto.com/id/1127367066/vector/"
+            "north-arrow-icon-or-n-direction-and-navigation-point-"
+            "symbol-vector-logo-in-circle-for-gps.jpg"
+            "?s=612x612&w=0&k=20&c=ynSV8xSAVPeGXRthPnrfuezFd7BGNJ0okpiEjdY5H00="
+        ),
+    },
+    "org_aGUHzOkqG9Volr3d": {
+        "primary": "#242b61",
+        "primary_dark": "#1a2049",
+        "primary_soft": "#e8eaf3",
+        "secondary": "#e4dddd",
+        "secondary_soft": "#f1ecec",
+        "logo_url": (
+            "https://i.fbcd.co/products/original/"
+            "logo-88d7008f5b8d759cec9c792bc69657ebd6ce2c9c336c183e9c262defb7d5e2d3.jpg"
+        ),
+    },
+}
+
+
 CIBA_GATED_CHAT_TOOLS = {
     "book_trip",
     "book_customer_experience",
@@ -100,9 +146,73 @@ CIBA_GATED_CHAT_TOOLS = {
 }
 
 
-def _short_arg(value) -> str:
-    s = str(value)
-    return s if len(s) <= 40 else s[:37] + "…"
+def _short_arg(value, max_len: int = 120) -> str:
+    if isinstance(value, (dict, list)):
+        s = json.dumps(value, ensure_ascii=False, default=str)
+    else:
+        s = str(value)
+    return s if len(s) <= max_len else s[: max_len - 1] + "…"
+
+
+def _summarize_tool_result(name: str, result: str) -> str:
+    """One-line, human-readable summary of what the tool returned, for
+    the chat status feed. Returns an empty string when nothing useful
+    is parseable."""
+    try:
+        data = json.loads(result)
+    except Exception:
+        return ""
+
+    if isinstance(data, dict):
+        if "error" in data:
+            return f"error: {_short_arg(data['error'], max_len=160)}"
+        # write tools — surface the created object's id / name
+        if data.get("ok"):
+            for key in (
+                "trip", "agent", "customer", "auth0_user", "experience",
+                "document", "request", "auth0_org", "company",
+            ):
+                obj = data.get(key)
+                if isinstance(obj, dict):
+                    obj_id = (
+                        obj.get("id")
+                        or obj.get("user_id")
+                        or obj.get("name")
+                        or obj.get("filename")
+                    )
+                    return f"{key}{f' {obj_id}' if obj_id else ''}"
+            if "deleted_user_id" in data:
+                return f"deleted user {data['deleted_user_id']}"
+            if "removed_from_org" in data:
+                return f"removed from {data['removed_from_org']}"
+            return "ok"
+        # search/list results — count what came back
+        for key in ("flights", "experiences", "matches", "results"):
+            if isinstance(data.get(key), list):
+                return f"{len(data[key])} {key}"
+        if "match_count" in data:
+            return f"{data['match_count']} matches"
+
+    if isinstance(data, list):
+        return f"{len(data)} items"
+
+    return ""
+
+
+def _tool_status_badge(name: str) -> str:
+    """Tag the tool with what permission tier / Auth0 surface it hits,
+    so the operator can see at a glance why a call is taking time."""
+    tags: list[str] = []
+    if name in CIBA_GATED_CHAT_TOOLS:
+        tags.append("CIBA")
+    if name in {
+        "create_auth0_organization", "delete_auth0_organization",
+        "create_travel_agent", "delete_travel_agent",
+    }:
+        tags.append("Mgmt API")
+    if name in GOOGLE_TOOLS_BY_NAME:
+        tags.append("Token Vault")
+    return f" `{' · '.join(tags)}`" if tags else ""
 
 
 def _build_bookings(trips: list[dict], experiences: list[dict]) -> list[dict]:
@@ -416,6 +526,12 @@ async def require_login(request: Request, response: Response) -> tuple[dict, dic
         company = get_company(org_name=org)
         if company:
             ctx["company_display_name"] = company["display_name"]
+    brand = (
+        BRAND_OVERRIDES.get(ctx.get("org_id") or "")
+        or BRAND_OVERRIDES.get(ctx.get("org_name") or "")
+    )
+    if brand:
+        ctx["brand"] = brand
 
     # Per-user app-state isolation: Starlette's SessionMiddleware cookie
     # is independent of the SDK's session, so app state (conversation,
@@ -1138,12 +1254,27 @@ async def chat_stream(request: Request, response: Response):
                     except json.JSONDecodeError:
                         args = {}
 
-                    status_lines = [f"\n\n_⏺ Calling **{name}**_"]
+                    badge = _tool_status_badge(name)
+                    status_lines = [f"\n\n_⏺ Calling **{name}**_{badge}"]
                     if args:
-                        arg_repr = ", ".join(
-                            f"`{k}`={_short_arg(v)}" for k, v in args.items()
+                        for k, v in args.items():
+                            status_lines.append(
+                                f"_  • `{k}` = {_short_arg(v)}_"
+                            )
+                    else:
+                        status_lines.append("_  • (no arguments)_")
+                    required = (
+                        CZ_TOOLS.get(name, {}).get("required_scopes")
+                        if name in CZ_TOOLS
+                        else None
+                    )
+                    if required:
+                        status_lines.append(
+                            "_  • required scope"
+                            f"{'s' if len(required) > 1 else ''}: "
+                            + ", ".join(f"`{s}`" for s in required)
+                            + "_"
                         )
-                        status_lines.append(f"_  → {arg_repr}_")
                     if name in CIBA_GATED_CHAT_TOOLS:
                         status_lines.append(
                             "_  📲 Push notification sent — approve in the "
@@ -1152,7 +1283,9 @@ async def chat_stream(request: Request, response: Response):
                         )
                     yield "\n".join(status_lines) + "\n"
 
+                    start_t = time.monotonic()
                     result = await dispatch_any_tool(name, args, ctx, refresh_token)
+                    elapsed_ms = int((time.monotonic() - start_t) * 1000)
 
                     is_error = False
                     try:
@@ -1160,7 +1293,13 @@ async def chat_stream(request: Request, response: Response):
                         is_error = isinstance(parsed, dict) and "error" in parsed
                     except Exception:
                         pass
-                    yield f"_  {'✗ failed' if is_error else '✓ done'}_\n\n"
+                    summary = _summarize_tool_result(name, result)
+                    status_icon = "✗ failed" if is_error else "✓ done"
+                    final_line = f"_  {status_icon} in {elapsed_ms} ms"
+                    if summary:
+                        final_line += f" — {summary}"
+                    final_line += "_\n\n"
+                    yield final_line
 
                     messages.append(
                         {"role": "tool", "tool_call_id": tc["id"], "content": result}

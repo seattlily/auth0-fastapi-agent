@@ -5,13 +5,43 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{% if ctx and ctx.company_display_name %}{{ ctx.company_display_name }} · {% endif %}{% block title %}CompassZero{% endblock %}</title>
     <link rel="stylesheet" href="/static/style.css?v={{ static_version }}">
+    {% if ctx and ctx.brand %}
+    {# Minimal per-org theming — keep CompassZero's white surface and
+       default button styling. We only add: a thin gradient accent bar
+       at the very top of the page, a colored ring around the logo,
+       and a colored underline on the active nav link. #}
+    <style>
+        .org-accent-bar {
+            height: 3px;
+            background: linear-gradient(90deg, {{ ctx.brand.primary }} 0%, {{ ctx.brand.secondary }} 100%);
+        }
+        .brand-logo {
+            width: 28px;
+            height: 28px;
+            border-radius: 6px;
+            object-fit: cover;
+            margin-right: 0.55rem;
+            vertical-align: middle;
+            border: 2px solid {{ ctx.brand.primary }};
+            box-shadow: 0 0 0 1px {{ ctx.brand.secondary }};
+        }
+        nav.topnav .nav-links a.active {
+            border-bottom: 2px solid {{ ctx.brand.primary }};
+            padding-bottom: 0.3rem;
+        }
+    </style>
+    {% endif %}
     {% block head_extra %}{% endblock %}
 </head>
 <body>
+    {% if ctx and ctx.brand %}<div class="org-accent-bar"></div>{% endif %}
     {% if user %}
     <nav class="topnav">
         <div class="topnav-inner">
             <a class="brand" href="/dashboard">
+                {% if ctx and ctx.brand and ctx.brand.logo_url %}
+                <img src="{{ ctx.brand.logo_url }}" alt="" class="brand-logo">
+                {% endif %}
                 {% if ctx and ctx.company_display_name %}
                 {{ ctx.company_display_name }}<small style="margin-left:0.4rem; font-size:0.62rem; font-weight:600; color:var(--muted); letter-spacing:0.08em; text-transform:uppercase;">on CompassZero</small>
                 {% else %}

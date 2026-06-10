@@ -18,6 +18,7 @@
 </div>
 {% endif %}
 
+{% if ctx.role != 'customer' %}
 <div class="card" style="padding: 1.25rem 1.5rem;">
     <div style="display:flex; align-items:center; justify-content:space-between; gap:1rem; margin-bottom:0.85rem; flex-wrap:wrap;">
         <div>
@@ -33,6 +34,7 @@
         {% include "_chat_widget.html" %}
     {% endwith %}
 </div>
+{% endif %}
 
 {% if ctx.role == 'compass_admin' %}
 
