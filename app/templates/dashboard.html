@@ -38,7 +38,7 @@
 
 <div class="card-grid">
     <div class="kpi">
-        <div class="kpi-label">Companies</div>
+        <div class="kpi-label">Organizations</div>
         <div class="kpi-value">{{ kpi.companies }}</div>
     </div>
     <div class="kpi">
@@ -53,14 +53,14 @@
     <div class="kpi">
         <div class="kpi-label">Total spend</div>
         <div class="kpi-value">${{ '{:,.0f}'.format(kpi.total_spent) }}</div>
-        <div class="kpi-meta">across all companies</div>
+        <div class="kpi-meta">across all organizations</div>
     </div>
 </div>
 
 <div class="card">
-    <h2>Companies</h2>
+    <h2>Organizations</h2>
     <table>
-        <thead><tr><th>Company</th><th>Org slug</th><th>Budget</th><th>Spent</th><th></th></tr></thead>
+        <thead><tr><th>Organization</th><th>Org slug</th><th>Budget</th><th>Spent</th><th></th></tr></thead>
         <tbody>
         {% for c in companies %}
             <tr>
@@ -85,7 +85,7 @@
 {% if my_company %}
 <div class="card-grid">
     <div class="kpi">
-        <div class="kpi-label">Your company</div>
+        <div class="kpi-label">Your organization</div>
         <div class="kpi-value" style="font-size:1.2rem">{{ my_company.display_name }}</div>
         <div class="kpi-meta"><code>{{ my_company.org_name }}</code></div>
     </div>
@@ -108,6 +108,53 @@
     </div>
 </div>
 {% endif %}
+
+{% if flash_success %}<div class="alert alert-success"><strong>Success:</strong> {{ flash_success }}</div>{% endif %}
+{% if flash_error %}<div class="alert alert-error"><strong>Error:</strong> {{ flash_error }}</div>{% endif %}
+
+<div class="card">
+    <h2>Pending approvals <span class="muted" style="font-size:0.85rem; font-weight:400;">({{ pending_approvals|length if pending_approvals else 0 }})</span></h2>
+    <p class="muted" style="font-size:0.9rem;">Customer-submitted requests awaiting your decision. Approving triggers a CIBA push to your enrolled device.</p>
+    {% if pending_approvals %}
+    <table>
+        <thead><tr><th>Request</th><th>Customer</th><th>Type</th><th>Summary</th><th>When</th><th>Cost</th><th></th></tr></thead>
+        <tbody>
+        {% for r in pending_approvals %}
+            <tr>
+                <td><code style="font-size:0.78rem;">{{ r.id }}</code><div class="muted" style="font-size:0.78rem;">{{ r.created_at }}</div></td>
+                <td>{{ customer_names.get(r.customer_id, r.customer_id) }}</td>
+                <td>{{ r.kind }}</td>
+                <td>
+                    {% if r.kind == 'trip' %}
+                        {{ r.details.origin }} → {{ r.details.destination }} ({{ r.details.type }})
+                    {% else %}
+                        {{ r.details.name }}{% if r.details.location %} <span class="muted">({{ r.details.location }})</span>{% endif %}
+                    {% endif %}
+                </td>
+                <td>
+                    {% if r.kind == 'trip' %}
+                        {{ r.details.depart_date }} – {{ r.details.return_date }}
+                    {% else %}
+                        {{ r.details.date }}
+                    {% endif %}
+                </td>
+                <td>{{ r.details.currency or 'USD' }} {{ '{:,.0f}'.format(r.details.cost) }}</td>
+                <td style="display:flex; gap:0.4rem;">
+                    <form method="post" action="/approvals/{{ r.id }}/approve" onsubmit="return confirm('Approve this request? You will get a CIBA push on your enrolled device.');" style="margin:0;">
+                        <button type="submit" class="btn btn-small">Approve</button>
+                    </form>
+                    <form method="post" action="/approvals/{{ r.id }}/deny" onsubmit="return confirm('Deny this request?');" style="margin:0;">
+                        <button type="submit" class="btn btn-small btn-secondary">Deny</button>
+                    </form>
+                </td>
+            </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <p class="muted">No pending requests right now.</p>
+    {% endif %}
+</div>
 
 <div class="card">
     <h2>Recent bookings</h2>

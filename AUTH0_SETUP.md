@@ -54,7 +54,7 @@ Still on the same Settings page, scroll to **Refresh Token Rotation**. Toggle **
 
 Scroll all the way down → expand **Advanced Settings** → **OAuth** sub-tab → **JSON Web Token (JWT) Signature Algorithm**. Should be `RS256`. (Default; change if it isn't.)
 
-### 1.6 Token Vault grant type
+### 1.6 Token Vault + Client Credentials grant types
 
 Same Advanced Settings panel → **Grant Types** sub-tab.
 
@@ -62,12 +62,14 @@ Make sure these are checked:
 - **Authorization Code** (default for RWA)
 - **Refresh Token** (default; needed for `offline_access`)
 - **Token Vault** — labeled exactly like that in newer dashboards, or shown as the long URN `urn:auth0:params:oauth:grant-type:token-exchange:federated-connection-access-token` in older ones.
+- **Client Credentials** — needed because the same app acts as the M2M client for Auth0 Management API calls (creating organizations, users, organization members, role assignments, Guardian enrollment tickets). If you'd rather use a dedicated M2M app, set `AUTH0_MGMT_CLIENT_ID` / `AUTH0_MGMT_CLIENT_SECRET` in `.env` and leave Client Credentials off here — but the simpler default reuses this client.
+- **CIBA** (`urn:openid:params:grant-type:ciba`) — required for the step-up push notifications used on destructive admin / agent actions.
 
-You can leave **Implicit**, **Password**, and **Client Credentials** unchecked — none of them are used by this app.
+You can leave **Implicit** and **Password** unchecked — neither is used by this app.
 
 Save Changes.
 
-> **Why this matters**: without the Token Vault grant, every federated tool call (calendar, gmail) returns a 403 with `Grant type ... not allowed for the client.`
+> **Why this matters**: without the Token Vault grant, every federated tool call (calendar, gmail) returns a 403 with `Grant type ... not allowed for the client.` Without Client Credentials, every Management API call (create/delete org, create/delete agent, generate enrollment ticket) fails with `unauthorized_client`. Without CIBA, every booking / org-create / agent-create returns a "Step-up authentication failed" error before mutating anything.
 
 ---
 
@@ -218,7 +220,45 @@ Skip this if you only need Google login. Otherwise:
 
 ---
 
-## Part 6 — Verification checklist
+## Part 6 — Auth0 Management API M2M scopes
+
+The CompassZero admin tools (and the `/mfa/enroll` page) call the Auth0 Management API with a client-credentials token minted from this same Regular Web App (or a dedicated M2M client if you set `AUTH0_MGMT_CLIENT_ID` / `_SECRET`).
+
+### 6.1 Authorize the application
+
+- Auth0 dashboard → **Applications** → **APIs**, then pick the **Auth0 Management API** (it's there by default — you don't create it).
+- **Machine to Machine Applications** tab → find your app (`auth0-fastapi-agent` or whatever you named it) → toggle **Authorized** on.
+- Click the down-arrow on the right to expand the scope list.
+
+### 6.2 Grant these scopes
+
+Tick **all** of the following:
+
+| Scope | Used by |
+|---|---|
+| `create:organizations` | `create_auth0_organization` chat tool / `POST /companies` form |
+| `read:organizations` | dashboard reconcile, drill-down |
+| `delete:organizations` | `delete_auth0_organization` chat tool / `POST /companies/{id}/delete` |
+| `read:organization_members` | `/companies/{id}` member list |
+| `create:organization_members` | `create_travel_agent` |
+| `delete:organization_members` | `delete_travel_agent` |
+| `create:organization_member_roles` | `create_travel_agent` (assigns the `travel_agent` Role) |
+| `create:users` | `create_travel_agent` (creates the Auth0 user in the database connection) |
+| `read:users` | `delete_travel_agent` (looks the user up by email) |
+| `delete:users` | `delete_travel_agent` (removes the Auth0 user) |
+| `read:roles` | `create_travel_agent` (resolves the `travel_agent` Role ID once, cached) |
+| `create:guardian_enrollment_tickets` | `/mfa/enroll` mints a one-shot Guardian ticket |
+| `read:guardian_enrollments` | dashboard "needs enrollment" nudge + `/profile` enrollment table |
+
+Click **Update**.
+
+> **Why this matters**: every chat tool that mutates Auth0 catches `ManagementError` and returns the raw Auth0 error JSON to the LLM. Missing a scope shows up to the user as "Auth0 Management API ... failed (403): insufficient scope" — quick to spot, but easier to set up correctly first.
+
+> **Dedicated M2M alternative**: if you'd rather not give the Regular Web App these scopes, create a separate **Machine to Machine** application, authorize **it** to the Management API with the scopes above, and set `AUTH0_MGMT_CLIENT_ID` and `AUTH0_MGMT_CLIENT_SECRET` in `.env`. `tools/auth0_management.py:_client_credentials()` falls back to those when set.
+
+---
+
+## Part 7 — Verification checklist
 
 Before testing the app at runtime, walk this list. Most "it doesn't work" reports come down to one of these being missed:
 
@@ -236,10 +276,12 @@ Before testing the app at runtime, walk this list. Most "it doesn't work" report
 | ☐ | Gmail API and Calendar API are both **enabled** on the Google Cloud project |
 | ☐ | Auth0 Google social connection has *your* Client ID + Secret (not the dev keys) and your app is toggled on under its Applications tab |
 | ☐ | (If using GitHub) Auth0 GitHub social connection has narrow scopes (`email` + `read:user`); your app is toggled on |
+| ☐ | Auth0 Management API → M2M tab: your app (or a dedicated M2M) is authorized for the 13 scopes listed in Part 6 |
+| ☐ | App's grant types include **Client Credentials** (Management API) and **CIBA** (step-up) in addition to Authorization Code, Refresh Token, and Token Vault |
 
 ---
 
-## Part 7 — How tokens flow through the app
+## Part 8 — How tokens flow through the app
 
 For each of these, the user must have logged in (so a session exists) and a refresh token is in `request.session["refresh_token"]`.
 

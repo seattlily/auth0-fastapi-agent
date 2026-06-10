@@ -4,12 +4,13 @@ CompassZero's permission model is driven entirely from Auth0:
 
 - A custom **Auth0 API** defines the scopes (permissions).
 - Three **Auth0 Roles** bundle those permissions for the three user types.
-- Three **Auth0 Organizations** represent the customer companies.
+- Auth0 **Organizations** represent the customer organizations (one Auth0 Organization per CompassZero customer org). The app calls the Management API to create / delete these at runtime.
 - A small **post-login Action** copies user-record IDs into custom claims.
+- **CIBA** (push-notification step-up via Guardian) gates every destructive action.
 
 The Python app reads `permissions`, `org_id`, `org_name`, plus two custom claims, off the access/ID token. It does **not** know the role assignments — those live in the dashboard.
 
-This file is the spec the workshop attendee follows. Generic Auth0 onboarding (creating the application, registering callback URLs, Token Vault grant, MRRT, etc.) lives in [`AUTH0_SETUP.md`](./AUTH0_SETUP.md). Read that first; come back here after Part 2.
+This file is the spec the workshop attendee follows. Generic Auth0 onboarding (creating the application, registering callback URLs, Token Vault grant, **Management API M2M scopes**, MRRT, etc.) lives in [`AUTH0_SETUP.md`](./AUTH0_SETUP.md). Read that first — Part 6 in particular covers the M2M scopes the admin chat tools need — then come back here.
 
 ---
 
@@ -43,19 +44,21 @@ This file is the spec the workshop attendee follows. Generic Auth0 onboarding (c
 
 | Scope | Description |
 |---|---|
-| `read:my_trips` | View your own bookings (customer) |
-| `read:company_trips` | View bookings inside your company (agent) |
-| `read:all_trips` | View bookings across all companies (admin) |
-| `read:my_company` | View your own company (agent, customer) |
-| `read:all_companies` | View all companies (admin) |
+| `read:my_trips` | View your own bookings (customer). Also gates: customer-side `request_trip` / `request_experience` chat tools, and Calendar/Gmail Token Vault tools (so customers can add their own trips to their own Calendar). |
+| `read:company_trips` | View bookings inside your organization (agent) |
+| `read:all_trips` | View bookings across all organizations (admin) |
+| `read:my_company` | View your own organization (agent, customer) |
+| `read:all_companies` | View all organizations (admin) |
 | `read:my_customers` | View customers your agency manages (agent) |
 | `read:all_customers` | View all customers (admin) |
-| `book:trips` | Create/modify trips (agent, admin) |
+| `book:trips` | Create/modify trips (agent, admin). Also gates the agent's `POST /approvals/{id}/{approve,deny}` dashboard endpoints. |
 | `book:experiences` | Create/modify experiences (agent, admin) |
-| `manage:companies` | Create/modify companies + budgets (admin) |
-| `manage:agents` | Create/modify travel agents (admin) |
+| `manage:companies` | Manage organizations (admin). Gates `create_auth0_organization` / `delete_auth0_organization` / `create_travel_agent` / `delete_travel_agent` / `generate_contract` chat tools. |
+| `manage:agents` | Reserved (admin) — currently same effective surface as `manage:companies` for the role-detection logic in `permissions.py`. Kept in case you want to split agent CRUD from org CRUD later. |
 
 Add each one (Permission name + description). Save.
+
+> **Note**: there is **no `book:*` permission for customers**. The "customer requests, agent approves" workflow is enforced at the chat-tool layer: customers' `request_trip` / `request_experience` tools are gated on `read:my_trips`; only the agent's dashboard buttons can convert a request into a real booking via `book:trips`.
 
 ### 1.5 Application Access tab
 
@@ -107,7 +110,7 @@ Permissions:
 
 ## 3. Auth0 Organizations
 
-Each travel-agency company is an Organization. The mock data ships with 3 — match these org names exactly:
+Each customer organization is an Auth0 Organization. The mock data ships with 3 — match these org names exactly. Admins can create / delete additional ones at runtime via the chat tools (`create_auth0_organization`, `delete_auth0_organization`); the local `COMPANIES` list reconciles with Auth0 every time the admin opens `/dashboard` or `/companies`.
 
 ### 3.1 Enable Organizations on the application
 
@@ -203,14 +206,16 @@ Click **Deploy**. Then **Actions → Triggers → Post Login** → drag your act
 After all of the above:
 
 1. Restart your local app.
-2. Log in as `jane@northwind.example`. You should be auto-logged into the Northwind org. `/profile` should show:
+2. Log in as `jane@northwind.example` (customer). She auto-logs into the Northwind org. `/profile` should show:
    - `org_name: northwind-corp`
    - `permissions: ["read:my_trips", "read:my_company"]`
    - `https://compasszero.app/customer_id: cu_jane`
-3. `/dashboard` shows Jane's two trips (`tr_001`, `tr_002`, `tr_012`).
-4. `/companies` redirects (no permission). The chat refuses "list all customers" but answers "what are my trips".
-5. Log out, log in as `admin@compasszero.com`. No org prompt. `/dashboard` shows global KPIs. `/companies` lists all 3.
-6. Log out, log in as `alex@compasszero.com`. Org prompt shows Northwind. `/dashboard` shows Northwind budget + recent bookings. The chat lets you "book a trip for cu_jane".
+3. `/dashboard` shows Jane's bookings.
+4. `/documents` shows only her invoices.
+5. Chat: "Search flights JFK to LHR on 2026-08-12" → returns options. "Request that flight, $850 round trip 2026-08-19" → submits a pending request. `/companies` redirects (no permission).
+6. Log out, log in as `alex@compasszero.com` (Northwind agent). Org prompt shows Northwind. `/dashboard` shows the budget, recent bookings, **and a Pending approvals card with Jane's request**. Click **Approve** → CIBA push fires (you must be enrolled — see step 8); approving creates the trip and Jane sees it on her `/trips`.
+7. Log out, log in as `admin@compasszero.com`. No org prompt. `/dashboard` shows global KPIs. `/companies` lists all 3 (or more, after you create some). Chat: "Add a travel agent at acme-inc named Pat Smith email pat@acme.example" → CIBA push, real Auth0 user is created and added to the org with the `travel_agent` role. Chat: "Generate a CompassZero contract for acme-inc" → new PDF appears on `/documents`.
+8. **First-time MFA enrollment** — admins and agents both need a Guardian factor for CIBA. The dashboard surfaces a one-shot enrollment nudge; clicking it opens `/mfa/enroll` which mints a Guardian ticket and renders a QR. Scan it with the Auth0 Guardian app on your phone.
 
 ---
 
@@ -219,10 +224,12 @@ After all of the above:
 - [ ] CompassZero API created with `https://compasszero.api`
 - [ ] RBAC enabled + permissions added to access token
 - [ ] All 11 permissions defined on the API
-- [ ] Three Roles created and permissions assigned
+- [ ] Three Roles created and permissions assigned (the `travel_agent` Role name must be exact — `create_travel_agent` resolves it by name via `find_role_by_name`)
 - [ ] Organizations enabled on the application
-- [ ] Three Organizations created with matching `org_name`
+- [ ] Three Organizations created with matching `org_name` (admins can add more at runtime)
 - [ ] Six test users created with role + (where relevant) org membership + `app_metadata`
 - [ ] Post-login Action deployed and added to the Login flow
+- [ ] Admin and agent test users have at least one **Guardian factor enrolled** (or are ready to enroll via `/mfa/enroll`) — required for CIBA
+- [ ] Application has the **Management API M2M scopes** authorized per [`AUTH0_SETUP.md` Part 6](./AUTH0_SETUP.md#part-6--auth0-management-api-m2m-scopes)
 - [ ] `AUTH0_AUDIENCE=https://compasszero.api` in `.env`
 - [ ] Restart uvicorn, log in, verify `/profile`

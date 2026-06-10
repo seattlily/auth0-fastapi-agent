@@ -16,7 +16,7 @@
     <div class="field"><div class="field-label">Departure</div><div class="field-value">{{ trip.depart_date }}</div></div>
     <div class="field"><div class="field-label">Return</div><div class="field-value">{{ trip.return_date }}</div></div>
     <div class="field"><div class="field-label">Customer</div><div class="field-value">{{ customer.name if customer else trip.customer_id }} <code>{{ trip.customer_id }}</code></div></div>
-    <div class="field"><div class="field-label">Company</div><div class="field-value">{{ company.display_name if company else trip.customer_id }}</div></div>
+    <div class="field"><div class="field-label">Organization</div><div class="field-value">{{ company.display_name if company else trip.customer_id }}</div></div>
 </div>
 
 <div class="card">

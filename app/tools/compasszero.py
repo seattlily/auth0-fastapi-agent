@@ -16,16 +16,21 @@ from typing import Awaitable, Callable
 
 from permissions import PermissionDenied, has_any_permission, has_permission, require, require_any
 from mock_data import (
+    add_approval_request,
     add_company,
     add_customer,
+    add_document,
     add_experience,
+    add_travel_agent,
     add_trip,
     get_companies,
+    get_company,
     get_customer,
     get_customers,
     get_experiences_for_trip,
     get_trip,
     get_trips,
+    remove_travel_agent,
 )
 
 
@@ -229,7 +234,7 @@ def _mock_flights(origin: str, destination: str, date: str) -> list[dict]:
 
 
 async def search_flights(args: dict, ctx: dict) -> str:
-    require(ctx, "book:trips")
+    require_any(ctx, "book:trips", "read:my_trips")
     origin = (args.get("origin") or "").strip()
     destination = (args.get("destination") or "").strip()
     date = (args.get("date") or "").strip()
@@ -267,7 +272,7 @@ _EXPERIENCE_CATEGORIES = sorted({e["category"] for e in _EXPERIENCE_CATALOG})
 
 
 async def search_experiences(args: dict, ctx: dict) -> str:
-    require(ctx, "book:experiences")
+    require_any(ctx, "book:experiences", "read:my_trips")
     location = (args.get("location") or "").strip().lower()
     category = (args.get("category") or "").strip().lower()
 
@@ -456,15 +461,274 @@ async def delete_auth0_organization(args: dict, ctx: dict) -> str:
     return json.dumps({"ok": True, "deleted": {"id": org["id"], "name": name}})
 
 
-async def create_customer(args: dict, ctx: dict) -> str:
+async def create_travel_agent(args: dict, ctx: dict) -> str:
+    """Admin-only: create a real Auth0 user, add them to an existing
+    Organization, and assign the travel_agent role. Mirrors locally
+    into the TRAVEL_AGENTS list so the dashboard reflects it."""
     require(ctx, "manage:companies")
-    customer = add_customer(
-        name=args["name"],
-        email=args["email"],
-        org_name=args["org_name"],
-        agent_id=args.get("agent_id"),
+    from .auth0_management import (
+        ManagementError,
+        add_organization_member,
+        assign_organization_member_roles,
+        create_database_user,
+        get_organization_by_name,
+        get_role_id,
     )
-    return json.dumps({"ok": True, "customer": customer})
+
+    org_slug = (args.get("org_name") or "").strip()
+    name = (args.get("name") or "").strip()
+    email = (args.get("email") or "").strip()
+    if not (org_slug and name and email):
+        return json.dumps(
+            {"error": "org_name, name, and email are all required."}
+        )
+
+    try:
+        org = await get_organization_by_name(org_slug)
+    except ManagementError as e:
+        return json.dumps({"error": str(e)})
+    if not org:
+        return json.dumps(
+            {
+                "error": (
+                    f"no Auth0 organization named '{org_slug}'. "
+                    "Create it first via create_auth0_organization, then retry."
+                )
+            }
+        )
+
+    try:
+        role_id = await get_role_id("travel_agent")
+    except ManagementError as e:
+        return json.dumps({"error": str(e)})
+    if not role_id:
+        return json.dumps(
+            {
+                "error": (
+                    "no Auth0 Role named 'travel_agent' found in the tenant. "
+                    "Create the role under Auth0 Dashboard → User Management → "
+                    "Roles before adding agents."
+                )
+            }
+        )
+
+    binding = f"Approve adding travel agent {email} to {org_slug}"
+    err = await _ciba_step_up(ctx, binding)
+    if err:
+        return err
+
+    try:
+        user = await create_database_user(email=email, name=name)
+        await add_organization_member(org["id"], user["user_id"])
+        await assign_organization_member_roles(
+            org["id"], user["user_id"], [role_id]
+        )
+    except ManagementError as e:
+        return json.dumps({"error": str(e)})
+
+    agent = add_travel_agent(name=name, email=email, org_name=org_slug)
+    return json.dumps(
+        {
+            "ok": True,
+            "agent": agent,
+            "auth0_user": {
+                "user_id": user.get("user_id"),
+                "email": user.get("email"),
+                "name": user.get("name"),
+            },
+            "note": (
+                "Auth0 user created without an email invite. The agent "
+                "will need an admin password reset or change-password "
+                "ticket before they can log in."
+            ),
+        }
+    )
+
+
+async def delete_travel_agent(args: dict, ctx: dict) -> str:
+    """Admin-only: remove a travel agent — strip them from the Auth0
+    organization, delete the underlying Auth0 user, and drop the local
+    mirror. Symmetric to create_travel_agent."""
+    require(ctx, "manage:companies")
+    from .auth0_management import (
+        ManagementError,
+        delete_user,
+        find_user_by_email,
+        get_organization_by_name,
+        remove_organization_member,
+    )
+
+    org_slug = (args.get("org_name") or "").strip()
+    email = (args.get("email") or "").strip()
+    if not (org_slug and email):
+        return json.dumps({"error": "org_name and email are both required."})
+
+    try:
+        org = await get_organization_by_name(org_slug)
+    except ManagementError as e:
+        return json.dumps({"error": str(e)})
+    if not org:
+        return json.dumps({"error": f"no Auth0 organization named '{org_slug}'"})
+
+    try:
+        user = await find_user_by_email(email)
+    except ManagementError as e:
+        return json.dumps({"error": str(e)})
+    if not user:
+        return json.dumps(
+            {
+                "error": (
+                    f"no Auth0 user with email {email}. The agent may have "
+                    "already been removed — only the local record will be "
+                    "cleaned up."
+                )
+            }
+        )
+
+    binding = f"Approve REMOVING travel agent {email} from {org_slug}"
+    err = await _ciba_step_up(ctx, binding)
+    if err:
+        return err
+
+    user_id = user["user_id"]
+    try:
+        await remove_organization_member(org["id"], user_id)
+        await delete_user(user_id)
+    except ManagementError as e:
+        return json.dumps({"error": str(e)})
+
+    removed = remove_travel_agent(email=email, org_name=org_slug)
+    return json.dumps(
+        {
+            "ok": True,
+            "removed_from_org": org_slug,
+            "deleted_user_id": user_id,
+            "local_agent": removed,
+        }
+    )
+
+
+async def generate_contract(args: dict, ctx: dict) -> str:
+    """Admin-only: generate a CompassZero ↔ org services contract PDF
+    and add it to the documents list. No CIBA — this is a low-risk
+    document creation, not an Auth0 mutation."""
+    require(ctx, "manage:companies")
+    from .documents import documents_dir, generate_contract_pdf
+
+    org_slug = (args.get("org_name") or "").strip()
+    if not org_slug:
+        return json.dumps({"error": "org_name is required."})
+
+    company = get_company(org_name=org_slug)
+    if not company:
+        return json.dumps(
+            {
+                "error": (
+                    f"no local organization named '{org_slug}'. Create the "
+                    "organization first via create_auth0_organization, then retry."
+                )
+            }
+        )
+
+    out = documents_dir() / f"contract-{org_slug}.pdf"
+    generate_contract_pdf(
+        org_name=org_slug,
+        display_name=company["display_name"],
+        output_path=out,
+    )
+    doc = add_document(
+        kind="contract",
+        title=f"CompassZero × {company['display_name']} services agreement",
+        filename=out.name,
+        org_name=org_slug,
+        size_bytes=out.stat().st_size,
+    )
+    return json.dumps({"ok": True, "document": doc})
+
+
+async def request_trip(args: dict, ctx: dict) -> str:
+    """Customer-facing: submit a trip request that an agent in the
+    customer's org must approve before it becomes a booking. No CIBA;
+    the agent's approve action is what triggers MFA later."""
+    require(ctx, "read:my_trips")
+    customer_id = ctx.get("customer_id")
+    org = ctx.get("org_name")
+    if not customer_id or not org:
+        return json.dumps(
+            {
+                "error": (
+                    "missing customer_id or org_name on token — log in via "
+                    "your travel agency's organization."
+                )
+            }
+        )
+
+    details = {
+        "type": args.get("type", "flight"),
+        "origin": args["origin"],
+        "destination": args["destination"],
+        "depart_date": args["depart_date"],
+        "return_date": args["return_date"],
+        "cost": float(args["cost"]),
+        "currency": args.get("currency", "USD"),
+    }
+    req = add_approval_request(
+        kind="trip",
+        customer_id=customer_id,
+        org_name=org,
+        details=details,
+    )
+    return json.dumps(
+        {
+            "ok": True,
+            "request": req,
+            "message": (
+                "Your travel agent has been notified. They'll review and "
+                "approve or deny the request from their dashboard — you'll "
+                "see the trip on /trips once approved."
+            ),
+        }
+    )
+
+
+async def request_experience(args: dict, ctx: dict) -> str:
+    """Customer-facing: request an experience that needs agent approval."""
+    require(ctx, "read:my_trips")
+    customer_id = ctx.get("customer_id")
+    org = ctx.get("org_name")
+    if not customer_id or not org:
+        return json.dumps(
+            {
+                "error": (
+                    "missing customer_id or org_name on token — log in via "
+                    "your travel agency's organization."
+                )
+            }
+        )
+
+    details = {
+        "name": args["name"],
+        "date": args["date"],
+        "cost": float(args["cost"]),
+        "location": args.get("location", ""),
+        "trip_id": args.get("trip_id", ""),
+    }
+    req = add_approval_request(
+        kind="experience",
+        customer_id=customer_id,
+        org_name=org,
+        details=details,
+    )
+    return json.dumps(
+        {
+            "ok": True,
+            "request": req,
+            "message": (
+                "Your travel agent has been notified. They'll review and "
+                "approve or deny the request from their dashboard."
+            ),
+        }
+    )
 
 
 async def create_my_customer(args: dict, ctx: dict) -> str:
@@ -506,7 +770,7 @@ TOOLS: dict[str, dict] = {
             "type": "function",
             "function": {
                 "name": "list_company_trips",
-                "description": "List all bookings inside the signed-in agent's company. Use for 'all our customers' trips', 'recent bookings for our company', etc.",
+                "description": "List all bookings inside the signed-in agent's organization. Use for 'all our customers' trips', 'recent bookings for our org', etc.",
                 "parameters": {"type": "object", "properties": {}},
             },
         },
@@ -518,7 +782,7 @@ TOOLS: dict[str, dict] = {
             "type": "function",
             "function": {
                 "name": "list_all_trips",
-                "description": "List bookings across all CompassZero companies. Admin-only.",
+                "description": "List bookings across all CompassZero organizations. Admin-only.",
                 "parameters": {"type": "object", "properties": {}},
             },
         },
@@ -542,7 +806,7 @@ TOOLS: dict[str, dict] = {
             "type": "function",
             "function": {
                 "name": "list_all_customers",
-                "description": "List every customer across all CompassZero companies. Admin-only.",
+                "description": "List every customer across all CompassZero organizations. Admin-only.",
                 "parameters": {"type": "object", "properties": {}},
             },
         },
@@ -554,7 +818,7 @@ TOOLS: dict[str, dict] = {
             "type": "function",
             "function": {
                 "name": "list_companies",
-                "description": "List every CompassZero company customer with budget vs. spent. Admin-only.",
+                "description": "List every CompassZero organization with budget vs. spent. Admin-only.",
                 "parameters": {"type": "object", "properties": {}},
             },
         },
@@ -576,7 +840,7 @@ TOOLS: dict[str, dict] = {
                         "destination":  {"type": "string", "description": "Destination city or IATA code."},
                         "depart_date":  {"type": "string", "description": "Departure date YYYY-MM-DD."},
                         "return_date":  {"type": "string", "description": "Return date YYYY-MM-DD."},
-                        "cost":         {"type": "number", "description": "Total cost in the company's currency."},
+                        "cost":         {"type": "number", "description": "Total cost in the organization's currency."},
                         "currency":     {"type": "string", "description": "ISO currency code. Default USD."},
                     },
                     "required": ["customer_id", "type", "origin", "destination", "depart_date", "return_date", "cost"],
@@ -678,12 +942,12 @@ TOOLS: dict[str, dict] = {
             "type": "function",
             "function": {
                 "name": "create_company",
-                "description": "Add a local CompassZero company record (mock data only — does NOT create the Auth0 organization). Admin-only. Prefer create_auth0_organization unless you specifically need a local-only entry.",
+                "description": "Add a local CompassZero organization record (mock data only — does NOT create the Auth0 organization). Admin-only. Prefer create_auth0_organization unless you specifically need a local-only entry.",
                 "parameters": {
                     "type": "object",
                     "properties": {
                         "org_name":     {"type": "string", "description": "Auth0 org slug (lowercase, dashes)."},
-                        "display_name": {"type": "string", "description": "Pretty company name."},
+                        "display_name": {"type": "string", "description": "Pretty organization name."},
                         "budget":       {"type": "number", "description": "Annual travel budget."},
                         "currency":     {"type": "string", "description": "ISO currency code. Default USD."},
                     },
@@ -701,9 +965,9 @@ TOOLS: dict[str, dict] = {
                 "name": "create_auth0_organization",
                 "description": (
                     "Create a real Auth0 Organization via the Management API "
-                    "AND mirror it into the local CompassZero company list. "
+                    "AND mirror it into the local CompassZero organization list. "
                     "Use this whenever an admin says 'create an organization', "
-                    "'add a new company / customer org', 'spin up a tenant for "
+                    "'add a new customer org', 'spin up a tenant for "
                     "Acme', etc. Admin-only. Triggers a CIBA push to the "
                     "admin's enrolled device — they must approve before the "
                     "org is created."
@@ -712,7 +976,7 @@ TOOLS: dict[str, dict] = {
                     "type": "object",
                     "properties": {
                         "name":         {"type": "string", "description": "Org slug — lowercase, dashes only, no spaces (e.g. 'acme-inc')."},
-                        "display_name": {"type": "string", "description": "Pretty company name shown in the UI (e.g. 'Acme Inc')."},
+                        "display_name": {"type": "string", "description": "Pretty organization name shown in the UI (e.g. 'Acme Inc')."},
                         "budget":       {"type": "number", "description": "Optional annual travel budget for the local mirror. Default 100000."},
                         "currency":     {"type": "string", "description": "Optional ISO currency code. Default USD."},
                     },
@@ -730,9 +994,9 @@ TOOLS: dict[str, dict] = {
                 "name": "delete_auth0_organization",
                 "description": (
                     "Delete an Auth0 Organization via the Management API and "
-                    "remove the matching local CompassZero company. Use when "
+                    "remove the matching local CompassZero organization. Use when "
                     "an admin says 'delete the org for Acme', 'remove the "
-                    "company customer X', etc. Admin-only. Triggers a CIBA "
+                    "organization X', etc. Admin-only. Triggers a CIBA "
                     "push to the admin's device — they must approve the "
                     "deletion before it executes. Confirm with the user "
                     "before calling this."
@@ -747,23 +1011,151 @@ TOOLS: dict[str, dict] = {
             },
         },
     },
-    "create_customer": {
+    "create_travel_agent": {
         "required_scopes": ("manage:companies",),
-        "fn": create_customer,
+        "fn": create_travel_agent,
         "schema": {
             "type": "function",
             "function": {
-                "name": "create_customer",
-                "description": "Create a new customer record under an existing company. Admin-only.",
+                "name": "create_travel_agent",
+                "description": (
+                    "Create a new travel agent inside an existing Auth0 "
+                    "organization. Use this whenever an admin says 'add a "
+                    "travel agent', 'create a new agent for Acme', 'invite "
+                    "a new agent', etc. Creates a real Auth0 user, adds "
+                    "them to the organization, and assigns the travel_agent "
+                    "role. Admin-only. Triggers a CIBA push to the admin's "
+                    "device — they must approve. IMPORTANT: admins manage "
+                    "organizations and travel agents only. Travel agents "
+                    "(not admins) add CUSTOMERS — never try to add a "
+                    "customer for an admin."
+                ),
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "name":     {"type": "string"},
-                        "email":    {"type": "string"},
-                        "org_name": {"type": "string", "description": "Auth0 org slug of the company."},
-                        "agent_id": {"type": "string", "description": "Optional travel agent ID (ag_xxx)."},
+                        "org_name": {"type": "string", "description": "Org slug of an existing Auth0 organization (e.g. 'acme-inc')."},
+                        "name":     {"type": "string", "description": "Agent's full name."},
+                        "email":    {"type": "string", "description": "Agent's email address — used as their Auth0 login."},
                     },
-                    "required": ["name", "email", "org_name"],
+                    "required": ["org_name", "name", "email"],
+                },
+            },
+        },
+    },
+    "delete_travel_agent": {
+        "required_scopes": ("manage:companies",),
+        "fn": delete_travel_agent,
+        "schema": {
+            "type": "function",
+            "function": {
+                "name": "delete_travel_agent",
+                "description": (
+                    "Remove a travel agent from an Auth0 organization and "
+                    "delete the underlying Auth0 user. Use whenever an admin "
+                    "says 'remove travel agent X', 'fire/offboard agent for "
+                    "Acme', 'delete agent y@z.com', etc. Admin-only. "
+                    "Triggers a CIBA push — the admin must approve. This "
+                    "fully deletes the Auth0 user account; if you only want "
+                    "to remove them from the org, ask the admin to clarify "
+                    "before calling. Always confirm the agent's email and "
+                    "org with the user before invoking."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "org_name": {"type": "string", "description": "Org slug the agent belongs to (e.g. 'acme-inc')."},
+                        "email":    {"type": "string", "description": "Agent's email address (used to find the Auth0 user)."},
+                    },
+                    "required": ["org_name", "email"],
+                },
+            },
+        },
+    },
+    "generate_contract": {
+        "required_scopes": ("manage:companies",),
+        "fn": generate_contract,
+        "schema": {
+            "type": "function",
+            "function": {
+                "name": "generate_contract",
+                "description": (
+                    "Generate a CompassZero ↔ organization services agreement "
+                    "PDF and store it in the documents list. Use whenever an "
+                    "admin says 'generate a contract for X', 'draft a "
+                    "CompassZero contract for org Y', 'I just created an "
+                    "organization, make the paperwork', etc. Admin-only. The "
+                    "organization must already exist (create it first via "
+                    "create_auth0_organization). Does NOT trigger CIBA — it's "
+                    "a low-risk document creation, not an Auth0 mutation."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "org_name": {"type": "string", "description": "Org slug of an existing organization (e.g. 'acme-inc')."},
+                    },
+                    "required": ["org_name"],
+                },
+            },
+        },
+    },
+    "request_trip": {
+        "required_scopes": ("read:my_trips",),
+        "fn": request_trip,
+        "schema": {
+            "type": "function",
+            "function": {
+                "name": "request_trip",
+                "description": (
+                    "Submit a trip request that the customer's travel agent "
+                    "will approve or deny. Use this whenever a CUSTOMER says "
+                    "'book a flight', 'I'd like to book a trip', 'add this "
+                    "flight to my bookings', etc. Customers cannot book "
+                    "directly — request_trip creates a pending approval "
+                    "request that shows up on their agent's dashboard. Once "
+                    "the agent approves, the trip lands in the customer's "
+                    "/trips list."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "type":         {"type": "string", "enum": ["flight", "hotel", "train"]},
+                        "origin":       {"type": "string", "description": "Origin city or IATA code."},
+                        "destination":  {"type": "string", "description": "Destination city or IATA code."},
+                        "depart_date":  {"type": "string", "description": "Departure date YYYY-MM-DD."},
+                        "return_date":  {"type": "string", "description": "Return date YYYY-MM-DD."},
+                        "cost":         {"type": "number", "description": "Total cost in the requested currency."},
+                        "currency":     {"type": "string", "description": "ISO currency code. Default USD."},
+                    },
+                    "required": ["type", "origin", "destination", "depart_date", "return_date", "cost"],
+                },
+            },
+        },
+    },
+    "request_experience": {
+        "required_scopes": ("read:my_trips",),
+        "fn": request_experience,
+        "schema": {
+            "type": "function",
+            "function": {
+                "name": "request_experience",
+                "description": (
+                    "Submit a request for an experience (cooking class, wine "
+                    "tasting, hike, etc.) that the customer's travel agent "
+                    "will approve or deny. Use whenever a CUSTOMER says 'book "
+                    "this experience for me', 'I want the Tuscan cooking "
+                    "class', etc. Customers can't book directly; their agent "
+                    "must approve."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "name":     {"type": "string", "description": "Experience name."},
+                        "date":     {"type": "string", "description": "Date YYYY-MM-DD."},
+                        "cost":     {"type": "number", "description": "Cost."},
+                        "location": {"type": "string", "description": "City or venue."},
+                        "trip_id":  {"type": "string", "description": "Optional trip ID this experience would attach to."},
+                    },
+                    "required": ["name", "date", "cost"],
                 },
             },
         },
@@ -793,7 +1185,7 @@ TOOLS: dict[str, dict] = {
         },
     },
     "search_experiences": {
-        "required_scopes": ("book:experiences",),
+        "required_scopes": (),
         "fn": search_experiences,
         "schema": {
             "type": "function",
@@ -802,12 +1194,12 @@ TOOLS: dict[str, dict] = {
                 "description": (
                     "Browse a curated catalog of experiences (cooking classes, "
                     "wine tastings, hikes, day trips, food tours, cultural "
-                    "outings) the agent can add to a customer's trip. Filter "
-                    "by location and/or category, or call with no args to "
-                    "see the whole catalog. After the user picks one, call "
-                    "book_experience with the chosen experience's name, the "
-                    "trip_id, a date inside the trip's window, the price as "
-                    "cost, and the location."
+                    "outings). Filter by location and/or category, or call with "
+                    "no args to see the whole catalog. After the user picks "
+                    "one: travel agents call book_experience or "
+                    "book_customer_experience to actually book; CUSTOMERS call "
+                    "request_experience instead — they cannot book directly, "
+                    "their travel agent has to approve."
                 ),
                 "parameters": {
                     "type": "object",
@@ -820,7 +1212,7 @@ TOOLS: dict[str, dict] = {
         },
     },
     "search_flights": {
-        "required_scopes": ("book:trips",),
+        "required_scopes": (),
         "fn": search_flights,
         "schema": {
             "type": "function",
@@ -831,8 +1223,9 @@ TOOLS: dict[str, dict] = {
                     "Returns 3 mock flight options (airline, flight_no, depart/arrive "
                     "times, duration, stops, price). Use this whenever the user asks "
                     "to look for flights, find a flight, or compare flight options. "
-                    "After the user picks one, call book_trip with the chosen flight's "
-                    "origin, destination, date, and price."
+                    "After the user picks one: travel agents call book_trip; "
+                    "CUSTOMERS call request_trip instead — customers cannot book "
+                    "directly, their travel agent has to approve the request first."
                 ),
                 "parameters": {
                     "type": "object",

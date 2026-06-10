@@ -1,0 +1,86 @@
+{% extends "base.html" %}
+{% set active = 'documents' %}
+{% block title %}Documents — CompassZero{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>Documents</h1>
+    <span class="muted">{{ total_count }} total · {{ scope_label }}</span>
+</div>
+
+{% if error %}<div class="alert alert-error"><strong>Error:</strong> {{ error }}</div>{% endif %}
+{% if success %}<div class="alert alert-success"><strong>Success:</strong> {{ success }}</div>{% endif %}
+
+{% if can_upload %}
+<div class="card">
+    <h3>Upload a document</h3>
+    <p class="muted" style="font-size: 0.92rem;">PDF, DOCX, or TXT up to 10&nbsp;MB. Files are stored against your organization.</p>
+    <form method="post" action="/documents/upload" enctype="multipart/form-data" style="display:grid; grid-template-columns: 1fr 1fr auto; gap: 0.75rem; align-items: end;">
+        <div>
+            <label class="muted" style="font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.06em; font-weight: 600; display: block; margin-bottom: 0.3rem;">Title (optional)</label>
+            <input name="title" placeholder="Title for the document" style="width: 100%; padding: 0.7rem 0.9rem; border: 1px solid var(--border); border-radius: var(--radius-sm); font-size: 0.95rem;">
+        </div>
+        <div>
+            <label class="muted" style="font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.06em; font-weight: 600; display: block; margin-bottom: 0.3rem;">File</label>
+            <input type="file" name="file" required accept=".pdf,.docx,.txt" style="width: 100%; padding: 0.55rem 0.75rem; border: 1px solid var(--border); border-radius: var(--radius-sm); font-size: 0.92rem; background: var(--surface);">
+        </div>
+        <button type="submit" class="btn">Upload</button>
+    </form>
+</div>
+{% endif %}
+
+{% macro doc_table(docs, kind_label) %}
+<div class="card">
+    <h2>{{ kind_label }} <span class="muted" style="font-size:0.85rem; font-weight:400;">({{ docs|length }})</span></h2>
+    {% if docs %}
+    <table>
+        <thead>
+            <tr>
+                <th>Title</th>
+                <th>Related to</th>
+                <th>Created</th>
+                <th>Size</th>
+                <th></th>
+            </tr>
+        </thead>
+        <tbody>
+        {% for d in docs %}
+            <tr>
+                <td>
+                    {{ d.title }}
+                    <div class="muted" style="font-size:0.78rem;"><code>{{ d.id }}</code> · {{ d.filename }}</div>
+                </td>
+                <td>
+                    {% if d.kind == 'contract' %}
+                        {{ company_names.get(d.org_name, d.org_name) }}
+                    {% elif d.kind == 'invoice' %}
+                        {{ customer_names.get(d.customer_id, d.customer_id) }}
+                        {% if d.trip_id %}<span class="muted">· <code>{{ d.trip_id }}</code></span>{% endif %}
+                    {% else %}
+                        {% if d.org_name %}{{ company_names.get(d.org_name, d.org_name) }}{% else %}—{% endif %}
+                    {% endif %}
+                </td>
+                <td><span class="muted" style="font-size:0.85rem;">{{ d.created_at }}</span></td>
+                <td><span class="muted" style="font-size:0.85rem;">{{ '{:,}'.format(d.size_bytes) }} B</span></td>
+                <td style="display:flex; gap:0.4rem;">
+                    <a class="btn btn-small" href="/documents/{{ d.id }}" target="_blank" rel="noopener">View</a>
+                    <a class="btn btn-small btn-secondary" href="/documents/{{ d.id }}?download=1">Download</a>
+                </td>
+            </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <p class="muted">None yet.</p>
+    {% endif %}
+</div>
+{% endmacro %}
+
+{% set show_contracts = ctx.role in ['compass_admin', 'travel_agent'] %}
+{% set show_invoices = ctx.role in ['compass_admin', 'travel_agent', 'customer'] %}
+{% set show_uploaded = ctx.role in ['compass_admin', 'travel_agent'] %}
+
+{% if show_contracts %}{{ doc_table(by_kind.get('contract', []), 'Contracts') }}{% endif %}
+{% if show_invoices %}{{ doc_table(by_kind.get('invoice', []), 'Invoices') }}{% endif %}
+{% if show_uploaded %}{{ doc_table(by_kind.get('uploaded', []), 'Uploaded files') }}{% endif %}
+{% endblock %}

@@ -22,12 +22,13 @@
                 <a href="/dashboard" {% if active=='dashboard' %}class="active"{% endif %}>Dashboard</a>
                 {% set perms = ctx.permissions or [] %}
                 {% if 'read:all_companies' in perms %}
-                <a href="/companies" {% if active=='companies' %}class="active"{% endif %}>Companies</a>
+                <a href="/companies" {% if active=='companies' %}class="active"{% endif %}>Organizations</a>
                 {% endif %}
                 {% if 'read:my_customers' in perms or 'read:all_customers' in perms %}
                 <a href="/customers" {% if active=='customers' %}class="active"{% endif %}>Customers</a>
                 {% endif %}
                 <a href="/trips" {% if active=='trips' %}class="active"{% endif %}>Trips</a>
+                <a href="/documents" {% if active=='documents' %}class="active"{% endif %}>Documents</a>
                 <a href="/chat" {% if active=='chat' %}class="active"{% endif %}>AI Assistant</a>
                 <a href="/connections" {% if active=='connections' %}class="active"{% endif %}>Connections</a>
                 <a href="/profile" {% if active=='profile' %}class="active"{% endif %}>Profile</a>

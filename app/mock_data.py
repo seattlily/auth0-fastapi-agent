@@ -7,7 +7,8 @@ COMPANIES[i]["org_name"] entry below.
 Resets on every uvicorn restart. Demo only.
 """
 
-from typing import Optional
+from datetime import datetime
+from typing import Iterable, Optional
 
 
 COMPANIES: list[dict] = [
@@ -51,6 +52,20 @@ TRIPS: list[dict] = [
     {"id": "tr_011", "customer_id": "cu_quinn", "type": "hotel",  "origin": "New York", "destination": "New York", "depart_date": "2026-06-10", "return_date": "2026-06-17", "cost": 2300, "currency": "EUR", "status": "completed"},
     {"id": "tr_012", "customer_id": "cu_jane",  "type": "train",  "origin": "London", "destination": "Edinburgh", "depart_date": "2026-07-19", "return_date": "2026-07-20", "cost": 95,   "currency": "USD", "status": "booked"},
 ]
+
+DOCUMENTS: list[dict] = []
+# Each entry:
+#   { id, kind: "contract"|"invoice"|"uploaded",
+#     title, filename, org_name, customer_id, trip_id,
+#     uploaded_by, created_at, size_bytes }
+
+
+APPROVAL_REQUESTS: list[dict] = []
+# Each entry:
+#   { id, kind: "trip"|"experience", status: "pending"|"approved"|"denied",
+#     customer_id, org_name, details: dict (booking args),
+#     trip_id, experience_id, created_at, decided_at, decided_by, decision_note }
+
 
 EXPERIENCES: list[dict] = [
     {"id": "ex_001", "customer_id": "cu_jane",  "trip_id": "tr_001", "name": "London Eye + Tower bridge tour",   "date": "2026-07-16", "cost": 65,  "location": "London"},
@@ -218,6 +233,29 @@ def add_company(org_name: str, display_name: str, budget: float, currency: str =
     return company
 
 
+def remove_travel_agent(email: str, org_name: str) -> Optional[dict]:
+    """Remove a travel agent matching email + org_name from the local
+    list. Returns the removed record or None if no match."""
+    for a in list(TRAVEL_AGENTS):
+        if a["email"].lower() == email.lower() and a["org_name"] == org_name:
+            TRAVEL_AGENTS.remove(a)
+            return a
+    return None
+
+
+def add_travel_agent(name: str, email: str, org_name: str) -> dict:
+    if not get_company(org_name=org_name):
+        raise ValueError(f"Unknown org_name: {org_name}")
+    agent = {
+        "id": _next_id("ag_", TRAVEL_AGENTS),
+        "email": email,
+        "name": name,
+        "org_name": org_name,
+    }
+    TRAVEL_AGENTS.append(agent)
+    return agent
+
+
 def add_customer(name: str, email: str, org_name: str, agent_id: Optional[str] = None) -> dict:
     if not get_company(org_name=org_name):
         raise ValueError(f"Unknown org_name: {org_name}")
@@ -232,3 +270,111 @@ def add_customer(name: str, email: str, org_name: str, agent_id: Optional[str] =
     }
     CUSTOMERS.append(customer)
     return customer
+
+
+# ---------- documents ----------
+
+
+def _now_iso() -> str:
+    return datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def add_document(
+    kind: str,
+    title: str,
+    filename: str,
+    org_name: str = "",
+    customer_id: str = "",
+    trip_id: str = "",
+    uploaded_by: str = "",
+    size_bytes: int = 0,
+) -> dict:
+    doc = {
+        "id": _next_id("doc_", DOCUMENTS),
+        "kind": kind,
+        "title": title,
+        "filename": filename,
+        "org_name": org_name,
+        "customer_id": customer_id,
+        "trip_id": trip_id,
+        "uploaded_by": uploaded_by,
+        "created_at": _now_iso(),
+        "size_bytes": int(size_bytes),
+    }
+    DOCUMENTS.append(doc)
+    return doc
+
+
+def get_document(doc_id: str) -> Optional[dict]:
+    return next((d for d in DOCUMENTS if d["id"] == doc_id), None)
+
+
+def get_documents(
+    org_name: Optional[str] = None,
+    customer_id: Optional[str] = None,
+    kinds: Optional[Iterable[str]] = None,
+) -> list[dict]:
+    out = list(DOCUMENTS)
+    if kinds is not None:
+        kinds_set = set(kinds)
+        out = [d for d in out if d["kind"] in kinds_set]
+    if org_name is not None:
+        out = [d for d in out if d.get("org_name") == org_name]
+    if customer_id is not None:
+        out = [d for d in out if d.get("customer_id") == customer_id]
+    return out
+
+
+# ---------- approval requests ----------
+
+
+def add_approval_request(
+    kind: str,
+    customer_id: str,
+    org_name: str,
+    details: dict,
+) -> dict:
+    req = {
+        "id": _next_id("req_", APPROVAL_REQUESTS),
+        "kind": kind,
+        "status": "pending",
+        "customer_id": customer_id,
+        "org_name": org_name,
+        "details": dict(details),
+        "trip_id": "",
+        "experience_id": "",
+        "created_at": _now_iso(),
+        "decided_at": "",
+        "decided_by": "",
+        "decision_note": "",
+    }
+    APPROVAL_REQUESTS.append(req)
+    return req
+
+
+def get_approval_request(req_id: str) -> Optional[dict]:
+    return next((r for r in APPROVAL_REQUESTS if r["id"] == req_id), None)
+
+
+def get_approval_requests(
+    org_name: Optional[str] = None,
+    customer_id: Optional[str] = None,
+    status: Optional[str] = None,
+) -> list[dict]:
+    out = list(APPROVAL_REQUESTS)
+    if org_name is not None:
+        out = [r for r in out if r.get("org_name") == org_name]
+    if customer_id is not None:
+        out = [r for r in out if r.get("customer_id") == customer_id]
+    if status is not None:
+        out = [r for r in out if r.get("status") == status]
+    return out
+
+
+def update_approval_request(req_id: str, **fields) -> Optional[dict]:
+    req = get_approval_request(req_id)
+    if not req:
+        return None
+    for k, v in fields.items():
+        req[k] = v
+    return req

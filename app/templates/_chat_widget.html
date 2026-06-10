@@ -24,18 +24,35 @@
         {% if not messages %}
         <div class="message assistant">
             <strong>Assistant</strong>
-            <div class="content">{% if ctx.role == 'compass_admin' %}Hi! I can help you list companies, customers, trips, or create new ones — including spinning up brand-new Auth0 organizations. What would you like to do?{% elif ctx.role == 'travel_agent' %}Hi! I can find flights, browse experiences (cooking classes, wine tastings, hikes), book trips, add new customers to your org, and pull details on existing bookings. What would you like to do?{% elif ctx.role == 'customer' %}Hi! I can tell you about your upcoming trips and any experiences booked for them. What would you like to know?{% else %}Hi! I'm the CompassZero assistant. Your role isn't fully provisioned yet — ask an admin to assign you a role to unlock my tools.{% endif %}</div>
+            <div class="content">{% if ctx.role == 'compass_admin' %}Hi! I can help you spin up new Auth0 organizations, add or remove travel agents, generate contracts, and list customers, trips, or organizations. (Travel agents — not admins — are the ones who add customers.) What would you like to do?{% elif ctx.role == 'travel_agent' %}Hi! I can find flights, browse experiences, book trips, add new customers to your organization, and pull details on existing bookings. Pending customer requests show up on your dashboard for one-click approval. What would you like to do?{% elif ctx.role == 'customer' %}Hi! I can search flights and experiences, list your trips, add a trip to your Google Calendar, and submit booking requests for your travel agent to approve. What would you like to do?{% else %}Hi! I'm the CompassZero assistant. Your role isn't fully provisioned yet — ask an admin to assign you a role to unlock my tools.{% endif %}</div>
         </div>
         {% endif %}
     </div>
 
-    {% if ctx and ctx.role == 'compass_admin' and not messages %}
-    <div class="prompt-chips" aria-label="Suggested prompts">
-        <span class="prompt-chips-label">Try:</span>
-        <button type="button" class="prompt-chip" data-prompt="Create a new company called ">Create a new company</button>
-        <button type="button" class="prompt-chip" data-prompt="Add a new travel agent ">Add a new agent</button>
-        <button type="button" class="prompt-chip" data-prompt="List agencies with the most spend">List agencies with most spend</button>
-    </div>
+    {% if ctx and not messages %}
+        {% if ctx.role == 'compass_admin' %}
+        <div class="prompt-chips" aria-label="Suggested prompts">
+            <span class="prompt-chips-label">Try:</span>
+            <button type="button" class="prompt-chip" data-prompt="Create a new organization called ">Create a new organization</button>
+            <button type="button" class="prompt-chip" data-prompt="Add a new travel agent ">Add a new agent</button>
+            <button type="button" class="prompt-chip" data-prompt="Generate a CompassZero contract for ">Generate a contract</button>
+            <button type="button" class="prompt-chip" data-prompt="List organizations with the most spend">List organizations with most spend</button>
+        </div>
+        {% elif ctx.role == 'travel_agent' %}
+        <div class="prompt-chips" aria-label="Suggested prompts">
+            <span class="prompt-chips-label">Try:</span>
+            <button type="button" class="prompt-chip" data-prompt="Book a flight ">Book a flight</button>
+            <button type="button" class="prompt-chip" data-prompt="Book an experience ">Book an experience</button>
+            <button type="button" class="prompt-chip" data-prompt="Add a new customer named ">Add a new customer</button>
+        </div>
+        {% elif ctx.role == 'customer' %}
+        <div class="prompt-chips" aria-label="Suggested prompts">
+            <span class="prompt-chips-label">Try:</span>
+            <button type="button" class="prompt-chip" data-prompt="Search for flights ">Search for flights</button>
+            <button type="button" class="prompt-chip" data-prompt="Request a trip ">Request a trip</button>
+            <button type="button" class="prompt-chip" data-prompt="List my trips">List my trips</button>
+        </div>
+        {% endif %}
     {% endif %}
 
     <form id="chat-form" method="post" action="/chat" class="chat-form">

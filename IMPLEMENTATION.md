@@ -10,13 +10,17 @@ For setup and quick start, see [README.md](./README.md). This document focuses o
 
 A single-process FastAPI web app that:
 
-1. Logs users in via **Auth0** (Authorization Code Flow with OIDC). Multiple IdPs supported on the universal-login page.
-2. Renders a **chat UI** (Jinja2 templates) where the LLM streams replies token-by-token.
-3. Personalizes the LLM's responses by injecting the signed-in user's **Auth0 ID/access token claims** into the system prompt.
-4. Lets the LLM call **Google Calendar** on the user's behalf via **Auth0 Token Vault**, using OpenAI function calling.
-5. Exposes a **Connected Accounts** page (using the Auth0 **My Account API**) where a user logged in with one IdP can attach a Google identity for Token Vault use, without changing their primary login.
+1. Logs users in via **Auth0** (Authorization Code Flow with OIDC). Multiple IdPs supported on the universal-login page; an **enterprise SSO connection** (Okta) can also be hot-swapped in for the staff/admin path via the `ADMIN_CONNECTION_NAME` env var.
+2. Reads the user's **Auth0 RBAC `permissions` claim** and **Auth0 Organizations `org_name` / `org_id` claims** off the access token, then maps to one of three CompassZero roles: `compass_admin`, `travel_agent`, `customer`.
+3. Renders **role-aware Jinja2 dashboards** plus a **streaming chat UI** where the LLM's tool list is filtered to whatever the user's permissions allow.
+4. Calls real **Auth0 Management API** endpoints from chat tools to create/delete Auth0 Organizations, create/delete users, assign roles, and add/remove organization members.
+5. Triggers **CIBA step-up** (push notifications via Guardian) for destructive actions — admin org management, agent management, trip booking/cancellation, and approving customer booking requests.
+6. Calls **Google Calendar / Gmail** on the user's behalf via **Auth0 Token Vault**, using OpenAI function calling.
+7. Exposes a **Connected Accounts** page (using the Auth0 **My Account API**) where a user logged in with one IdP can attach a Google identity for Token Vault use, without changing their primary login.
+8. Generates **mock contract / invoice PDFs** with a stdlib-only PDF writer and serves them through a permission-checked download route.
+9. Implements a **customer → travel-agent booking-approval workflow**: customers submit `request_trip` / `request_experience` chat tools; the request shows up on the agent's dashboard; the agent approves (with CIBA) or denies inline.
 
-Stack: FastAPI · `auth0-fastapi` (Auth0's official web-app SDK; replaces Authlib) · Starlette `SessionMiddleware` · Jinja2 · OpenAI Python SDK · `httpx` · `google-api-python-client`.
+Stack: FastAPI · `auth0-fastapi` (Auth0's official web-app SDK; replaces Authlib) · Starlette `SessionMiddleware` · Jinja2 · OpenAI Python SDK · `httpx` · `google-api-python-client`. PDF generation is hand-rolled in Python's stdlib (no external dep).
 
 The SDK auto-registers `/auth/login`, `/auth/callback`, and `/auth/logout` via `register_auth_routes`. Tools (Token Vault, My Account API, Google APIs) are still called directly from the same process via `httpx`.
 
@@ -33,16 +37,34 @@ The SDK auto-registers `/auth/login`, `/auth/callback`, and `/auth/logout` via `
     ├── .env                           # secrets — never committed (in .gitignore)
     ├── .env.example                   # template
     ├── requirements.txt
-    ├── main.py                        # FastAPI app, all routes
+    ├── main.py                        # FastAPI app, all routes, role-aware dashboard, CIBA endpoints
+    ├── mock_data.py                   # in-memory orgs/customers/trips/docs/approval requests
+    ├── permissions.py                 # access-token claims → user_context (role, scopes, org)
+    ├── documents/                     # generated PDFs (gitignored, lazy-seeded)
     ├── tools/
     │   ├── __init__.py
+    │   ├── compasszero.py             # role-gated chat tools (search/book/request/manage)
+    │   ├── auth0_management.py        # Management API: orgs, users, roles, member ops
+    │   ├── auth0_ciba.py              # CIBA step-up (Backchannel Auth + polling)
+    │   ├── auth0_my_account.py        # My Account API: connect/list/delete connected accounts
+    │   ├── documents.py               # stdlib PDF writer + contract/invoice templates
     │   ├── google_calendar.py         # Token Vault exchange + Calendar API
-    │   └── auth0_my_account.py        # My Account API: connect/list/delete connected accounts
+    │   └── google_gmail.py            # Token Vault exchange + Gmail API
     ├── static/style.css
     └── templates/
+        ├── base.html                  # nav, brand, role badge
         ├── home.html
-        ├── chat.html                  # streaming UI + Connections nav link
-        ├── profile.html               # raw token claims viewer
+        ├── dashboard.html             # role-aware: admin / agent (+ pending approvals) / customer
+        ├── companies.html             # /companies — orgs list + create form
+        ├── company_detail.html        # /companies/{id} — drill-down
+        ├── customers.html
+        ├── trips.html
+        ├── trip_detail.html
+        ├── documents.html             # role-scoped contracts / invoices / uploads
+        ├── chat.html                  # streaming chat full-page
+        ├── _chat_widget.html          # reusable chat partial (chips, MD render, streaming)
+        ├── profile.html               # raw token claims + Guardian enrollment status
+        ├── mfa_enroll.html            # one-shot Guardian enrollment ticket
         ├── connections.html           # connected-accounts management UI
         └── connections_callback.html  # JS shim that reads connect_code from URL fragment
 ```
@@ -53,16 +75,28 @@ The SDK auto-registers `/auth/login`, `/auth/callback`, and `/auth/logout` via `
 
 | Method | Path | Purpose |
 |---|---|---|
-| GET | `/` | Home; redirects logged-in users to `/chat` |
+| GET | `/` | Home; redirects logged-in users to `/dashboard` |
 | GET | `/auth/login` | Universal Auth0 login (any IdP) — auto-registered by SDK |
 | GET | `/auth/callback` | OAuth callback — auto-registered by SDK |
 | GET | `/auth/logout` | Clears session + Auth0 logout — auto-registered by SDK |
 | GET | `/connect/google-calendar` | Redirects to `/auth/login?connection=google-oauth2&connection_scope=...` for federated Calendar/Gmail consent at first login |
-| GET | `/profile` | Renders ID/access token claims |
-| GET | `/chat` | Chat page; renders prior conversation from session |
-| POST | `/chat` | Non-streaming form-submit fallback (no JS) |
-| POST | `/chat/stream` | Streaming chat with tool-calling loop |
+| GET | `/dashboard` | Role-aware dashboard. Travel agent branch surfaces pending approval requests for the agent's org. |
+| GET | `/profile` | Renders ID/access token claims + Guardian enrollment status |
+| GET, POST | `/companies` *(admin)* | Organization list / create — calls Auth0 Management API to create real Auth0 Organizations |
+| POST | `/companies/{id}/delete` *(admin)* | Delete an Auth0 Organization (CIBA-gated) |
+| GET | `/companies/{id}` | Organization drill-down (members, agents, customers, trips) |
+| GET | `/customers` | Customer list, scope-filtered to user's role |
+| GET | `/trips`, `/trips/{id}` | Trip list / detail, scope-filtered |
+| GET | `/documents` | Role-scoped documents page (contracts / invoices / uploads). Lazy-seeds missing PDFs. |
+| GET | `/documents/{id}` | Inline view of a document (PDF/TXT/DOCX). Permission-checked. Add `?download=1` to force attachment. |
+| POST | `/documents/upload` *(admin or agent)* | Multipart file upload (PDF/DOCX/TXT, ≤10 MB) |
+| POST | `/approvals/{id}/approve` *(agent)* | Approve a customer's pending request — triggers CIBA, then `add_trip` / `add_experience` |
+| POST | `/approvals/{id}/deny` *(agent)* | Deny a pending request inline |
+| GET | `/mfa/enroll` | Mints a Guardian enrollment ticket so users can register a CIBA-capable factor |
+| GET | `/chat` | Full-page chat |
+| POST | `/chat/stream` | Streaming chat with tool-calling loop (filters `tool_schemas` by role) |
 | POST | `/chat/save` | Persists user+assistant turn to session after the stream closes |
+| POST | `/chat/clear` | Wipes the session conversation |
 | GET | `/connections` | Lists currently connected accounts; "Connect Google Account" button |
 | POST | `/connections/connect/{connection}` | Initiates a Connected Accounts flow |
 | GET | `/connections/callback` | Renders the JS shim that reads `connect_code` from `window.location.hash` |
@@ -216,6 +250,121 @@ Per Auth0 docs, this clears the access/refresh tokens from the Token Vault but d
 
 `tools/google_calendar.py` calls Token Vault with `connection="google-oauth2"` and the user's refresh token. Token Vault transparently uses whichever Google identity is connected — primary login or connected account.
 
+### 4.5 Role-aware chat tool surface
+
+`tools/compasszero.py` exposes a `TOOLS` registry where each tool entry has:
+
+```python
+"create_travel_agent": {
+    "required_scopes": ("manage:companies",),
+    "fn": create_travel_agent,
+    "schema": {...},  # OpenAI function-tool JSON
+}
+```
+
+`visible_schemas(ctx)` filters by `all(s in perms for s in required_scopes)` so the model literally never sees tools the user can't call. `dispatch(name, args, ctx)` re-checks server-side and falls back to per-tool `require_any(...)` for tools that need OR semantics across permissions (e.g. `search_flights` is visible whenever a role has `book:trips` OR `read:my_trips`).
+
+Tool catalog by role:
+
+| Role | Tools visible to the LLM |
+|---|---|
+| `compass_admin` | every list_* / get_* + `create_auth0_organization`, `delete_auth0_organization`, `create_company` (local mock), `create_travel_agent`, `delete_travel_agent`, `generate_contract`, plus all booking tools |
+| `travel_agent` | `list_company_trips`, `list_my_customers`, `book_trip`, `book_experience`, `book_customer_experience`, `cancel_trip`, `create_my_customer`, `search_flights`, `search_experiences`, `get_trip_details` |
+| `customer` | `list_my_trips`, `get_trip_details`, `search_flights`, `search_experiences`, `request_trip`, `request_experience` (no direct booking) |
+
+Calendar / Gmail tools (`list_upcoming_calendar_events`, `create_calendar_event`, `list_recent_emails`) are gated separately in `main.py` via `_can_use_google_tools(ctx)` — `has_any_permission(ctx, "book:trips", "read:my_trips")`. All three roles qualify.
+
+### 4.6 CIBA step-up for destructive actions
+
+Six chat tools and the dashboard's Approve button trigger Auth0 CIBA (Backchannel Authentication) before mutating state:
+
+```
+book_trip · book_customer_experience · cancel_trip
+create_auth0_organization · create_travel_agent · delete_auth0_organization
+delete_travel_agent · POST /approvals/{id}/approve
+```
+
+`tools/auth0_ciba.py` posts to `/bc-authorize`, polls `/oauth/token` with `grant_type=urn:openid:params:grant-type:ciba`, and surfaces a tailored error if the user isn't enrolled. `binding_message` is human-readable (e.g. "Approve booking flight JFK to LHR 2026-08-12") and shown verbatim on the user's Guardian device. The chat-stream UI flashes a "📲 Push notification sent — approve in the Auth0 Guardian app on your phone (waiting up to 3 minutes)..." marker before dispatch so the operator knows where the latency is coming from.
+
+If a user has no Guardian factor enrolled, `step_up` raises `CibaNotEnrolledError`. Chat tools surface a deep link to `/mfa/enroll`; dashboard endpoints redirect there with `return_to=`.
+
+### 4.7 Auth0 Management API for org / agent lifecycle
+
+`tools/auth0_management.py` wraps a small, focused slice of `/api/v2`:
+
+| Helper | Endpoint | Used by |
+|---|---|---|
+| `create_organization` / `delete_organization` / `get_organization_by_name` / `list_organizations` / `list_organization_members` | `/api/v2/organizations*` | admin org CRUD; `reconcile_companies_with_auth0` for the local↔Auth0 mirror |
+| `create_database_user` / `delete_user` / `find_user_by_email` | `/api/v2/users*` | `create_travel_agent` / `delete_travel_agent` |
+| `add_organization_member` / `remove_organization_member` | `/api/v2/organizations/{id}/members*` | agent lifecycle |
+| `assign_organization_member_roles` | `/api/v2/organizations/{id}/members/{uid}/roles` | assigns `travel_agent` role |
+| `find_role_by_name` / `get_role_id` | `/api/v2/roles?name_filter=` (cached) | one-time `travel_agent` role lookup |
+| `create_enrollment_ticket` / `list_user_enrollments` | `/api/v2/guardian/*` | `/mfa/enroll` page + dashboard "needs enrollment" nudge |
+
+All calls go through `_get_management_token()` which mints a client-credentials token against the Management API audience and caches it for the token lifetime. Required M2M scopes are listed in `AUTH0_SETUP.md`.
+
+`reconcile_companies_with_auth0()` runs at the top of the admin's `/dashboard` and `/companies` routes. It pulls the live org list from Auth0 and reconciles into the local `COMPANIES` mock — adding new orgs, removing deleted ones, and refreshing display names. Rate-limited via `SYNC_TTL_SECONDS = 120` and an `asyncio.Lock` so concurrent requests don't double-sync.
+
+### 4.8 Documents (mock contracts + invoices, stdlib PDF writer)
+
+`tools/documents.py` is a hand-rolled PDF 1.4 writer — no `fpdf`, `reportlab`, or other dependency. `write_pdf(path, blocks)` emits a one-page Letter PDF with two built-in fonts (Helvetica and Helvetica-Bold), word-wrapping each block to fit the page width by character count (we don't bundle Helvetica AFM metrics, so `_WRAP_BY_SIZE` is a coarse map by font size).
+
+Two templates:
+- `generate_contract_pdf(org_name, display_name)` → `app/documents/contract-{slug}.pdf` — mock services agreement.
+- `generate_invoice_pdf(trip, customer, company)` → `app/documents/invoice-{trip_id}.pdf` — itemized invoice.
+
+`main.py:_ensure_seed_documents()` runs at the top of `/documents` and `/dashboard`. It iterates `COMPANIES` and `TRIPS`, generating any missing PDFs and appending DOCUMENTS rows. Idempotent — checks DOCUMENTS by `(kind, key)` first.
+
+**Why lazy seed** instead of hooking `add_company` / `add_trip`: keeps `mock_data.py` pure (no I/O), means newly created orgs/trips get docs the next time anyone loads the dashboard or visits `/documents` (no startup latency).
+
+**Why serve through a route** (`GET /documents/{id}`) instead of mounting `app/documents/` as a static dir: we need the role check. `_user_can_view_doc(ctx, doc)` mirrors the page filter:
+
+| Role | Can view |
+|---|---|
+| `compass_admin` | all docs |
+| `travel_agent` | docs where `org_name == ctx.org_name` |
+| `customer` | invoices where `customer_id == ctx.customer_id` |
+
+Without `?download=1`, the route emits `Content-Disposition: inline` so PDFs/TXT open in a new tab. With `?download=1` (or by passing `filename=` to `FileResponse`), the browser downloads.
+
+**Admin-only contract generation chat tool** `generate_contract` calls `generate_contract_pdf` and `add_document`. No CIBA — generation is low-risk. The Auth0 org must already exist locally (seeded by `reconcile_companies_with_auth0` after `create_auth0_organization`).
+
+Uploads (`POST /documents/upload`): multipart form, extension-allowlist `{.pdf, .docx, .txt}`, 10 MB cap. Saved with a timestamped prefix to dedupe filenames. Scoped to the uploader's `org_name`.
+
+### 4.9 Customer → travel-agent booking-approval workflow
+
+The premise: customers can search but not book directly. They run `request_trip` / `request_experience` (chat tools gated on `read:my_trips`), which append a row to `APPROVAL_REQUESTS`:
+
+```python
+{
+  "id": "req_007",
+  "kind": "trip" | "experience",
+  "status": "pending" | "approved" | "denied",
+  "customer_id": "cu_jane",
+  "org_name": "northwind-corp",   # the agent's org — derived from ctx.org_name
+  "details": {...booking args...},
+  "trip_id": "" | "tr_013",        # populated when approved
+  "experience_id": "" | "ex_007",
+  "created_at": "...",
+  "decided_at": "...",
+  "decided_by": "ag_alex",
+  "decision_note": "",
+}
+```
+
+The travel-agent dashboard branch pulls `get_approval_requests(org_name=org, status="pending")` and renders a card above "Recent bookings". Each row has **Approve** and **Deny** POST forms.
+
+`POST /approvals/{id}/approve` (gated on `book:trips`):
+1. Look up the request; ensure `status == "pending"` and `org_name == ctx.org_name`.
+2. CIBA step-up against the agent's enrolled device, with binding `Approve booking request {id} for {customer.name}`.
+3. Call `add_trip(...)` or `add_experience(...)` from the stored `details`.
+4. `update_approval_request(id, status="approved", trip_id=…, decided_at=…, decided_by=ctx.agent_id)`.
+5. Redirect back to `/dashboard?success=...`.
+
+`POST /approvals/{id}/deny` is simpler — no CIBA, just status flip with optional `note`.
+
+**No chat tools** for the agent's approve/deny side. The dashboard buttons are the only entry points; the system prompt explicitly steers the LLM away from impersonating that flow.
+
 ---
 
 ## 5. Auth0 dashboard configuration (one-time)
@@ -234,6 +383,7 @@ These cannot be automated from code. Without them, runtime calls fail with descr
 | Applications → your app → **Multi-Resource Refresh Token** | Enable MRRT; include the My Account API |
 | Authentication → **Social → Google** | Configure with a real Google OAuth client (not Auth0's dev keys); enable the connection for the app |
 | Authentication → **Social → GitHub** *(if used)* | Configure with your own GitHub OAuth client; permissions tab → keep only `email` and `read:user` |
+| APIs → **Auth0 Management API** → Machine to Machine Applications → your app | Authorize the app and grant: `create:organizations`, `read:organizations`, `delete:organizations`, `read:organization_members`, `create:organization_members`, `delete:organization_members`, `create:organization_member_roles`, `create:users`, `read:users`, `delete:users`, `read:roles`, `create:guardian_enrollment_tickets`, `read:guardian_enrollments`. Without these the chat tools that hit `/api/v2` fall back to error JSON. |
 
 ---
 
@@ -314,7 +464,11 @@ When you add scopes to the Authlib `scope` (e.g., the connected_accounts scopes)
 
 It does not restart on `.env` edits, and module-import-time reads of `os.environ[...]` (in `oauth.register(...)`, `app.add_middleware(...)`) are captured at process start. **Restart the process when changing env vars.**
 
-### 8.11 Python 3.14 + corporate zero-trust agents
+### 8.11 Documents are lazy-seeded — newly created orgs/trips don't get PDFs immediately
+
+`_ensure_seed_documents()` only runs at the top of `/dashboard` and `/documents`. If you create an org via the chat (`create_auth0_organization`) and then immediately open `/documents`, you'll see the new contract — but if you book a trip via the chat and inspect `DOCUMENTS` programmatically without revisiting either of those routes, the invoice won't exist yet. Trigger by reloading `/documents`. Same for the `app/documents/` directory: it's gitignored and recreated on first call to `documents_dir()`.
+
+### 8.12 Python 3.14 + corporate zero-trust agents
 
 Some corporate zero-trust network agents (Prisma Access, ZScaler, Cato) intercept TLS at a level that breaks Python 3.14's stdlib `socket` module — every connection fails with `OSError: [Errno 9] Bad file descriptor`. `curl` works, `pip` doesn't.
 

@@ -18,19 +18,28 @@ from starlette.middleware.sessions import SessionMiddleware
 
 from mock_data import (
     COMPANIES,
+    DOCUMENTS,
     EXPERIENCES,
     TRAVEL_AGENTS,
     TRIPS,
     add_company,
+    add_document,
+    add_experience,
+    add_trip,
     get_agent,
     get_agents,
+    get_approval_request,
+    get_approval_requests,
     get_companies,
     get_company,
     get_customer,
     get_customers,
+    get_document,
+    get_documents,
     get_experiences_for_trip,
     get_trip,
     get_trips,
+    update_approval_request,
 )
 from permissions import (
     PermissionDenied,
@@ -61,6 +70,11 @@ from tools.auth0_my_account import (
 from tools.compasszero import TOOLS as CZ_TOOLS
 from tools.compasszero import dispatch as cz_dispatch
 from tools.compasszero import visible_schemas as cz_visible_schemas
+from tools.documents import (
+    documents_dir,
+    generate_contract_pdf,
+    generate_invoice_pdf,
+)
 from tools.google_calendar import (
     CALENDAR_TOOL_SCHEMA,
     CREATE_CALENDAR_EVENT_TOOL_SCHEMA,
@@ -80,7 +94,9 @@ CIBA_GATED_CHAT_TOOLS = {
     "book_customer_experience",
     "cancel_trip",
     "create_auth0_organization",
+    "create_travel_agent",
     "delete_auth0_organization",
+    "delete_travel_agent",
 }
 
 
@@ -235,6 +251,92 @@ openai_client = AsyncOpenAI(
 LLM_MODEL = os.environ.get("LLM_MODEL", "gpt-4o-mini")
 
 
+# ---------- documents ----------
+
+
+_UPLOAD_ALLOWED_EXT = {".pdf", ".docx", ".txt"}
+_UPLOAD_MAX_BYTES = 10 * 1024 * 1024  # 10 MB
+
+
+def _ensure_seed_documents() -> None:
+    """Generate any missing contract / invoice PDFs and DOCUMENTS entries
+    on demand. Idempotent — safe to call from /dashboard and /documents."""
+    have_contracts = {
+        d["org_name"] for d in DOCUMENTS if d["kind"] == "contract"
+    }
+    for company in COMPANIES:
+        if company["org_name"] in have_contracts:
+            continue
+        out = documents_dir() / f"contract-{company['org_name']}.pdf"
+        if not out.exists():
+            generate_contract_pdf(
+                org_name=company["org_name"],
+                display_name=company["display_name"],
+                output_path=out,
+            )
+        add_document(
+            kind="contract",
+            title=f"CompassZero × {company['display_name']} services agreement",
+            filename=out.name,
+            org_name=company["org_name"],
+            size_bytes=out.stat().st_size,
+        )
+
+    have_invoices = {d["trip_id"] for d in DOCUMENTS if d["kind"] == "invoice"}
+    for trip in TRIPS:
+        if trip["id"] in have_invoices:
+            continue
+        customer = get_customer(trip["customer_id"])
+        if not customer:
+            continue
+        company = get_company(org_name=customer.get("org_name", ""))
+        out = documents_dir() / f"invoice-{trip['id']}.pdf"
+        if not out.exists():
+            generate_invoice_pdf(
+                trip=trip, customer=customer, company=company, output_path=out
+            )
+        add_document(
+            kind="invoice",
+            title=f"Invoice {trip['id'].upper().replace('TR_', 'INV-')} · {customer['name']}",
+            filename=out.name,
+            org_name=customer.get("org_name", ""),
+            customer_id=customer["id"],
+            trip_id=trip["id"],
+            size_bytes=out.stat().st_size,
+        )
+
+
+def _docs_visible_to(ctx: dict) -> list[dict]:
+    role = ctx.get("role")
+    if role == "compass_admin":
+        return list(DOCUMENTS)
+    if role == "travel_agent":
+        org = ctx.get("org_name") or ""
+        return [d for d in DOCUMENTS if d.get("org_name") == org]
+    if role == "customer":
+        cid = ctx.get("customer_id") or ""
+        return [
+            d
+            for d in DOCUMENTS
+            if d["kind"] == "invoice" and d.get("customer_id") == cid
+        ]
+    return []
+
+
+def _user_can_view_doc(ctx: dict, doc: dict) -> bool:
+    role = ctx.get("role")
+    if role == "compass_admin":
+        return True
+    if role == "travel_agent":
+        return doc.get("org_name") == ctx.get("org_name")
+    if role == "customer":
+        return (
+            doc["kind"] == "invoice"
+            and doc.get("customer_id") == ctx.get("customer_id")
+        )
+    return False
+
+
 # ---------- helpers ----------
 
 
@@ -362,12 +464,27 @@ def build_system_prompt(user: dict | None, ctx: dict) -> str:
         "the request itself is genuinely ambiguous (e.g., 'fix the trip' — "
         "which trip?). If a user asks for something outside their role, "
         "politely explain what they can do instead.\n\n"
+        "Roles are distinct: admins (compass_admin) manage organizations and "
+        "travel agents only; travel agents manage customers and bookings. If "
+        "an admin asks to add a customer, decline politely and offer to add "
+        "a travel agent (use create_travel_agent) or a new organization "
+        "instead — never repurpose another tool to create a customer for an "
+        "admin.\n\n"
+        "Booking approvals: customers cannot book directly. When a customer "
+        "asks to 'book' something, route them to request_trip / "
+        "request_experience instead — that creates a pending request a "
+        "travel agent must approve from their dashboard. After calling "
+        "request_*, tell the customer their agent will review the request. "
+        "Travel agents review and approve / deny pending requests on their "
+        "dashboard, not via chat tools.\n\n"
         f"User profile:\n{json.dumps(profile, indent=2, default=str)}"
     )
 
 
-# Calendar / Gmail tools — gated to users who can book trips (agents + admins).
-GOOGLE_TOOL_REQUIRED = "book:trips"
+# Calendar / Gmail tools — available to anyone with at least their own
+# trip-read scope. Agents/admins get full access; customers get them so
+# they can add their own trips to their own Google Calendar.
+GOOGLE_TOOL_PERMISSIONS = ("book:trips", "read:my_trips")
 GOOGLE_TOOLS_BY_NAME = {
     "list_upcoming_calendar_events": (CALENDAR_TOOL_SCHEMA, list_upcoming_calendar_events),
     "create_calendar_event": (CREATE_CALENDAR_EVENT_TOOL_SCHEMA, create_calendar_event),
@@ -375,8 +492,12 @@ GOOGLE_TOOLS_BY_NAME = {
 }
 
 
+def _can_use_google_tools(ctx: dict) -> bool:
+    return has_any_permission(ctx, *GOOGLE_TOOL_PERMISSIONS)
+
+
 def visible_google_schemas(ctx: dict) -> list[dict]:
-    if not has_permission(ctx, GOOGLE_TOOL_REQUIRED):
+    if not _can_use_google_tools(ctx):
         return []
     return [s for s, _ in GOOGLE_TOOLS_BY_NAME.values()]
 
@@ -466,6 +587,8 @@ async def dashboard(request: Request, response: Response):
         "messages": request.session.get("conversation", []),
         "visible_tools": visible_tools,
         "needs_enrollment": needs_enrollment,
+        "flash_success": request.query_params.get("success"),
+        "flash_error": request.query_params.get("error"),
     }
 
     if role == "compass_admin":
@@ -498,6 +621,9 @@ async def dashboard(request: Request, response: Response):
         customer_ids = {c["id"] for c in customers}
         experiences = [e for e in EXPERIENCES if e["customer_id"] in customer_ids]
         bookings = _build_bookings(trips, experiences)
+        pending_approvals = (
+            get_approval_requests(org_name=org, status="pending") if org else []
+        )
         return templates.TemplateResponse(
             request=request,
             name="dashboard.html",
@@ -507,6 +633,7 @@ async def dashboard(request: Request, response: Response):
                 "bookings": bookings,
                 "kpi": {"customers": len(customers)},
                 "customer_names": customer_names,
+                "pending_approvals": pending_approvals,
             },
         )
 
@@ -916,9 +1043,14 @@ async def dispatch_any_tool(name: str, args: dict, ctx: dict, refresh_token: str
     if name in CZ_TOOLS:
         return await cz_dispatch(name, args, ctx)
     if name in GOOGLE_TOOLS_BY_NAME:
-        if not has_permission(ctx, GOOGLE_TOOL_REQUIRED):
+        if not _can_use_google_tools(ctx):
             return json.dumps(
-                {"error": f"permission denied — Google tools need {GOOGLE_TOOL_REQUIRED}"}
+                {
+                    "error": (
+                        "permission denied — Google tools need one of "
+                        f"{', '.join(GOOGLE_TOOL_PERMISSIONS)}"
+                    )
+                }
             )
         try:
             return await dispatch_google_tool(name, args, refresh_token)
@@ -1234,3 +1366,295 @@ async def connections_disconnect(
             url=f"/connections?error={quote_plus(str(e))}", status_code=303
         )
     return RedirectResponse(url="/connections?success=disconnected", status_code=303)
+
+
+# ---------- documents ----------
+
+
+@app.get("/documents")
+async def documents_page(request: Request, response: Response):
+    user, _, ctx = await require_login(request, response)
+    if not user:
+        return RedirectResponse(url="/auth/login")
+    _ensure_seed_documents()
+    docs = _docs_visible_to(ctx)
+    customer_names = {c["id"]: c["name"] for c in get_customers()}
+    company_names = {c["org_name"]: c["display_name"] for c in get_companies()}
+
+    by_kind = {"contract": [], "invoice": [], "uploaded": []}
+    for d in docs:
+        by_kind.setdefault(d["kind"], []).append(d)
+    for kind in by_kind:
+        by_kind[kind].sort(key=lambda d: d["created_at"], reverse=True)
+
+    can_upload = has_any_permission(ctx, "manage:companies", "book:trips")
+
+    if has_permission(ctx, "read:all_companies"):
+        scope_label = "all organizations"
+    elif ctx.get("role") == "travel_agent":
+        scope_label = ctx.get("org_name") or "your organization"
+    else:
+        scope_label = "your invoices"
+
+    return templates.TemplateResponse(
+        request=request,
+        name="documents.html",
+        context={
+            "user": user,
+            "ctx": ctx,
+            "by_kind": by_kind,
+            "total_count": len(docs),
+            "scope_label": scope_label,
+            "can_upload": can_upload,
+            "customer_names": customer_names,
+            "company_names": company_names,
+            "error": request.query_params.get("error"),
+            "success": request.query_params.get("success"),
+        },
+    )
+
+
+@app.get("/documents/{doc_id}")
+async def documents_download(request: Request, response: Response, doc_id: str):
+    user, _, ctx = await require_login(request, response)
+    if not user:
+        return RedirectResponse(url="/auth/login")
+    _ensure_seed_documents()
+    doc = get_document(doc_id)
+    if not doc or not _user_can_view_doc(ctx, doc):
+        return RedirectResponse(url="/documents?error=document+not+found", status_code=303)
+    path = documents_dir() / doc["filename"]
+    if not path.exists():
+        return RedirectResponse(url="/documents?error=file+missing", status_code=303)
+    from fastapi.responses import FileResponse
+
+    media_type = "application/pdf"
+    if doc["filename"].endswith(".txt"):
+        media_type = "text/plain"
+    elif doc["filename"].endswith(".docx"):
+        media_type = (
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        )
+
+    # ?download=1 forces attachment; without it, render inline so the
+    # browser opens PDFs/TXT in a new tab.
+    download = request.query_params.get("download") in ("1", "true")
+    if download:
+        return FileResponse(
+            path=str(path), media_type=media_type, filename=doc["filename"]
+        )
+    return FileResponse(
+        path=str(path),
+        media_type=media_type,
+        headers={
+            "Content-Disposition": f'inline; filename="{doc["filename"]}"'
+        },
+    )
+
+
+@app.post("/documents/upload")
+async def documents_upload(request: Request, response: Response):
+    from fastapi import UploadFile
+
+    user, _, ctx = await require_login(request, response)
+    if not user:
+        return RedirectResponse(url="/auth/login")
+    if not has_any_permission(ctx, "manage:companies", "book:trips"):
+        return RedirectResponse(
+            url="/documents?error=upload+requires+admin+or+agent+role",
+            status_code=303,
+        )
+
+    from urllib.parse import quote_plus
+
+    form = await request.form()
+    upload: UploadFile | None = form.get("file")
+    title = (form.get("title") or "").strip()
+    if upload is None or not getattr(upload, "filename", ""):
+        return RedirectResponse(
+            url="/documents?error=no+file+selected", status_code=303
+        )
+
+    import os as _os
+
+    _, ext = _os.path.splitext(upload.filename.lower())
+    if ext not in _UPLOAD_ALLOWED_EXT:
+        allowed = ",".join(sorted(_UPLOAD_ALLOWED_EXT))
+        return RedirectResponse(
+            url=f"/documents?error={quote_plus(f'file type {ext} not allowed; pick {allowed}')}",
+            status_code=303,
+        )
+
+    contents = await upload.read()
+    if len(contents) > _UPLOAD_MAX_BYTES:
+        return RedirectResponse(
+            url="/documents?error=file+too+large+%2810MB+max%29", status_code=303
+        )
+
+    safe_name = (
+        upload.filename.replace("/", "_").replace("\\", "_").replace("..", "_")
+    )
+    out = documents_dir() / f"{int(time.time())}-{safe_name}"
+    out.write_bytes(contents)
+
+    add_document(
+        kind="uploaded",
+        title=title or upload.filename,
+        filename=out.name,
+        org_name=ctx.get("org_name") or "",
+        uploaded_by=ctx.get("sub") or user.get("sub", ""),
+        size_bytes=out.stat().st_size,
+    )
+    return RedirectResponse(
+        url=f"/documents?success={quote_plus('Uploaded ' + upload.filename)}",
+        status_code=303,
+    )
+
+
+# ---------- approval requests (agent dashboard buttons) ----------
+
+
+@app.post("/approvals/{request_id}/approve")
+async def approvals_approve(
+    request: Request, response: Response, request_id: str
+):
+    user, _, ctx = await require_login(request, response)
+    if not user:
+        return RedirectResponse(url="/auth/login")
+    if not has_permission(ctx, "book:trips"):
+        return RedirectResponse(url="/dashboard", status_code=303)
+
+    from urllib.parse import quote_plus
+
+    req = get_approval_request(request_id)
+    if not req:
+        return RedirectResponse(
+            url="/dashboard?error=request+not+found", status_code=303
+        )
+    if req["status"] != "pending":
+        return RedirectResponse(
+            url=f"/dashboard?error=request+already+{req['status']}",
+            status_code=303,
+        )
+    if req.get("org_name") != ctx.get("org_name"):
+        return RedirectResponse(
+            url="/dashboard?error=request+is+outside+your+organization",
+            status_code=303,
+        )
+
+    customer = get_customer(req["customer_id"])
+    binding = (
+        f"Approve booking request {request_id} "
+        f"for {customer['name'] if customer else req['customer_id']}"
+    )
+    try:
+        await step_up(
+            user_sub=ctx.get("sub"),
+            binding_message=binding,
+            max_seconds=180,
+        )
+    except CibaNotEnrolledError:
+        return RedirectResponse(
+            url=f"/mfa/enroll?return_to={quote_plus('/dashboard')}",
+            status_code=303,
+        )
+    except CibaError as e:
+        return RedirectResponse(
+            url=f"/dashboard?error={quote_plus(f'CIBA step-up failed: {e}')}",
+            status_code=303,
+        )
+
+    details = req["details"]
+    try:
+        if req["kind"] == "trip":
+            booking = add_trip(
+                customer_id=req["customer_id"],
+                type=details["type"],
+                origin=details["origin"],
+                destination=details["destination"],
+                depart_date=details["depart_date"],
+                return_date=details["return_date"],
+                cost=float(details["cost"]),
+                currency=details.get("currency", "USD"),
+            )
+            update_approval_request(
+                request_id,
+                status="approved",
+                trip_id=booking["id"],
+                decided_at=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                decided_by=ctx.get("agent_id") or "",
+            )
+        elif req["kind"] == "experience":
+            booking = add_experience(
+                customer_id=req["customer_id"],
+                name=details["name"],
+                date=details["date"],
+                cost=float(details["cost"]),
+                trip_id=details.get("trip_id", ""),
+                location=details.get("location", ""),
+            )
+            update_approval_request(
+                request_id,
+                status="approved",
+                experience_id=booking["id"],
+                decided_at=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                decided_by=ctx.get("agent_id") or "",
+            )
+        else:
+            return RedirectResponse(
+                url=f"/dashboard?error={quote_plus('unknown request kind: ' + req['kind'])}",
+                status_code=303,
+            )
+    except Exception as e:
+        return RedirectResponse(
+            url=f"/dashboard?error={quote_plus(f'{type(e).__name__}: {e}')}",
+            status_code=303,
+        )
+
+    return RedirectResponse(
+        url=f"/dashboard?success={quote_plus('Approved request ' + request_id)}",
+        status_code=303,
+    )
+
+
+@app.post("/approvals/{request_id}/deny")
+async def approvals_deny(
+    request: Request, response: Response, request_id: str
+):
+    user, _, ctx = await require_login(request, response)
+    if not user:
+        return RedirectResponse(url="/auth/login")
+    if not has_permission(ctx, "book:trips"):
+        return RedirectResponse(url="/dashboard", status_code=303)
+
+    from urllib.parse import quote_plus
+
+    req = get_approval_request(request_id)
+    if not req:
+        return RedirectResponse(
+            url="/dashboard?error=request+not+found", status_code=303
+        )
+    if req["status"] != "pending":
+        return RedirectResponse(
+            url=f"/dashboard?error=request+already+{req['status']}",
+            status_code=303,
+        )
+    if req.get("org_name") != ctx.get("org_name"):
+        return RedirectResponse(
+            url="/dashboard?error=request+is+outside+your+organization",
+            status_code=303,
+        )
+
+    form = await request.form()
+    note = (form.get("note") or "").strip()
+    update_approval_request(
+        request_id,
+        status="denied",
+        decided_at=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        decided_by=ctx.get("agent_id") or "",
+        decision_note=note,
+    )
+    return RedirectResponse(
+        url=f"/dashboard?success={quote_plus('Denied request ' + request_id)}",
+        status_code=303,
+    )

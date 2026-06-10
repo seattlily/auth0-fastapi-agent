@@ -39,3 +39,6 @@ Thumbs.db
 
 # Claude Code local settings
 .claude/
+
+# Generated PDFs (contracts/invoices regenerated lazily on demand)
+app/documents/

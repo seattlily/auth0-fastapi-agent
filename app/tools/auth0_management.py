@@ -11,7 +11,14 @@ Required scopes on the M2M grant:
 - `create:organizations`
 - `read:organizations`
 - `read:organization_members`
+- `create:organization_members`
+- `delete:organization_members`
+- `create:organization_member_roles`
 - `delete:organizations`
+- `create:users`
+- `read:users`
+- `delete:users`
+- `read:roles`
 - `create:guardian_enrollment_tickets`  (for /mfa/enroll)
 - `read:guardian_enrollments`           (to show enrollment status)
 Authorize them under Auth0 Dashboard → APIs → Auth0 Management API
@@ -20,6 +27,7 @@ Authorize them under Auth0 Dashboard → APIs → Auth0 Management API
 
 import asyncio
 import os
+import secrets
 import time
 from typing import Any
 
@@ -186,6 +194,138 @@ async def delete_organization(org_id: str) -> None:
     if resp.status_code in (204, 200):
         return
     _raise_for_status(resp, "delete organization")
+
+
+_role_id_cache: dict[str, str] = {}
+
+
+async def find_role_by_name(name: str) -> dict | None:
+    """Look up an Auth0 Role by exact name (case-insensitive). The
+    `name_filter` query is a substring match, so we still verify
+    equality client-side."""
+    token = await _get_management_token()
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        resp = await client.get(
+            f"{_api_base()}/roles",
+            params={"name_filter": name},
+            headers={"Authorization": f"Bearer {token}"},
+        )
+    _raise_for_status(resp, "list roles")
+    data = resp.json()
+    roles = data.get("roles") if isinstance(data, dict) else data
+    for role in roles or []:
+        if role.get("name", "").lower() == name.lower():
+            _role_id_cache[name] = role["id"]
+            return role
+    return None
+
+
+async def get_role_id(name: str) -> str | None:
+    cached = _role_id_cache.get(name)
+    if cached:
+        return cached
+    role = await find_role_by_name(name)
+    return role["id"] if role else None
+
+
+async def create_database_user(
+    email: str,
+    name: str,
+    connection: str = "Username-Password-Authentication",
+) -> dict:
+    """Create a user in a Database connection. Generates a strong
+    random password we never reveal — the demo doesn't email it
+    out, so the new agent will need an admin reset or password-
+    change ticket to actually log in."""
+    token = await _get_management_token()
+    # Mix in a digit + symbol so we satisfy any password policy.
+    password = secrets.token_urlsafe(24) + "Aa1!"
+    body = {
+        "email": email,
+        "name": name,
+        "connection": connection,
+        "password": password,
+        "email_verified": False,
+        "verify_email": False,
+    }
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        resp = await client.post(
+            f"{_api_base()}/users",
+            json=body,
+            headers={"Authorization": f"Bearer {token}"},
+        )
+    _raise_for_status(resp, "create user")
+    return resp.json()
+
+
+async def add_organization_member(org_id: str, user_id: str) -> None:
+    token = await _get_management_token()
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        resp = await client.post(
+            f"{_api_base()}/organizations/{org_id}/members",
+            json={"members": [user_id]},
+            headers={"Authorization": f"Bearer {token}"},
+        )
+    if resp.status_code in (200, 201, 204):
+        return
+    _raise_for_status(resp, "add organization member")
+
+
+async def assign_organization_member_roles(
+    org_id: str, user_id: str, role_ids: list[str]
+) -> None:
+    token = await _get_management_token()
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        resp = await client.post(
+            f"{_api_base()}/organizations/{org_id}/members/{user_id}/roles",
+            json={"roles": role_ids},
+            headers={"Authorization": f"Bearer {token}"},
+        )
+    if resp.status_code in (200, 201, 204):
+        return
+    _raise_for_status(resp, "assign organization member roles")
+
+
+async def find_user_by_email(email: str) -> dict | None:
+    """Look up an Auth0 user by email. Returns the first match or None.
+    Email collisions across connections are theoretically possible but
+    we treat the first hit as authoritative for this demo."""
+    token = await _get_management_token()
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        resp = await client.get(
+            f"{_api_base()}/users-by-email",
+            params={"email": email},
+            headers={"Authorization": f"Bearer {token}"},
+        )
+    _raise_for_status(resp, "find user by email")
+    data = resp.json() or []
+    return data[0] if data else None
+
+
+async def remove_organization_member(org_id: str, user_id: str) -> None:
+    token = await _get_management_token()
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        resp = await client.request(
+            "DELETE",
+            f"{_api_base()}/organizations/{org_id}/members",
+            json={"members": [user_id]},
+            headers={"Authorization": f"Bearer {token}"},
+        )
+    if resp.status_code in (200, 204):
+        return
+    _raise_for_status(resp, "remove organization member")
+
+
+async def delete_user(user_id: str) -> None:
+    token = await _get_management_token()
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        resp = await client.delete(
+            f"{_api_base()}/users/{user_id}",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+    if resp.status_code in (200, 204):
+        return
+    _raise_for_status(resp, "delete user")
 
 
 async def list_organization_members(org_id: str) -> list[dict]:
