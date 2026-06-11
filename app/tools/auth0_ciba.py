@@ -103,11 +103,26 @@ def _domain() -> str:
 
 
 def _client_id() -> str:
-    return os.environ["AUTH0_CLIENT_ID"]
+    """Client id used for CIBA bc-authorize / token exchange.
+
+    Falls back to AUTH0_CLIENT_ID when AUTH0_CIBA_CLIENT_ID isn't set.
+    Setting it to a separate Auth0 application is what lets the main
+    web app drop the CIBA grant type — required when the web app's
+    Organizations setting is `organization_usage: require` (Business
+    Users Only login experience), since `require` and CIBA are
+    mutually exclusive on a single Auth0 application.
+    """
+    return (
+        os.environ.get("AUTH0_CIBA_CLIENT_ID")
+        or os.environ["AUTH0_CLIENT_ID"]
+    )
 
 
 def _client_secret() -> str:
-    return os.environ["AUTH0_CLIENT_SECRET"]
+    return (
+        os.environ.get("AUTH0_CIBA_CLIENT_SECRET")
+        or os.environ["AUTH0_CLIENT_SECRET"]
+    )
 
 
 def login_hint_for_user_sub(sub: str) -> str:
