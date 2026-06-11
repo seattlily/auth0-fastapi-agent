@@ -86,6 +86,46 @@
         {% block content %}{% endblock %}
     </main>
 
+    {# CIBA waiting overlay — shown while a form posted with data-ciba is
+       blocking on /bc-authorize + /oauth/token polling. Any form with a
+       data-ciba="<confirm prompt>" attribute triggers it after the user
+       confirms. Visible until the browser navigates to the redirect the
+       server returns (success or error). #}
+    <div id="ciba-overlay" class="ciba-overlay" style="display:none;" aria-hidden="true" role="alertdialog" aria-labelledby="ciba-title">
+        <div class="ciba-card">
+            <div class="ciba-icon">📲</div>
+            <h3 id="ciba-title">Push sent to your device</h3>
+            <p>Open the <strong>Auth0 Guardian</strong> app on your phone and approve the request to continue.</p>
+            <div class="ciba-spinner" aria-hidden="true"></div>
+            <p class="muted ciba-elapsed">Waiting for approval…</p>
+        </div>
+    </div>
+    <script>
+        (function () {
+            document.addEventListener('submit', function (e) {
+                var form = e.target;
+                if (!form || !form.matches || !form.matches('form[data-ciba]')) return;
+                var msg = form.getAttribute('data-ciba');
+                if (msg && !window.confirm(msg)) {
+                    e.preventDefault();
+                    return;
+                }
+                var overlay = document.getElementById('ciba-overlay');
+                if (!overlay) return;
+                overlay.style.display = 'flex';
+                overlay.setAttribute('aria-hidden', 'false');
+                var elapsedEl = overlay.querySelector('.ciba-elapsed');
+                if (!elapsedEl) return;
+                var start = Date.now();
+                elapsedEl.textContent = 'Waiting for approval…';
+                setInterval(function () {
+                    var s = Math.floor((Date.now() - start) / 1000);
+                    elapsedEl.textContent = 'Waiting for approval… (' + s + 's)';
+                }, 1000);
+            });
+        })();
+    </script>
+
     {% block scripts %}{% endblock %}
 </body>
 </html>

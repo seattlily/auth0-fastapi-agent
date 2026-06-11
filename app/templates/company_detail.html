@@ -8,7 +8,7 @@
     <div style="display:flex; align-items:center; gap:1rem;">
         <span class="muted"><code>{{ company.org_name }}</code></span>
         {% if 'manage:companies' in (ctx.permissions or []) %}
-        <form method="post" action="/companies/{{ company.id }}/delete" onsubmit="return confirm('Delete this Auth0 organization? You will get a CIBA push on your enrolled device — approve it to confirm. This cannot be undone.');" style="margin: 0;">
+        <form method="post" action="/companies/{{ company.id }}/delete" data-ciba="Delete this Auth0 organization? You'll get a push on your enrolled device — approve to confirm. This cannot be undone." style="margin: 0;">
             <button type="submit" class="btn btn-small btn-danger">Delete organization</button>
         </form>
         {% endif %}

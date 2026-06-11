@@ -142,7 +142,7 @@
                 </td>
                 <td>{{ r.details.currency or 'USD' }} {{ '{:,.0f}'.format(r.details.cost) }}</td>
                 <td style="display:flex; gap:0.4rem;">
-                    <form method="post" action="/approvals/{{ r.id }}/approve" onsubmit="return confirm('Approve this request? You will get a CIBA push on your enrolled device.');" style="margin:0;">
+                    <form method="post" action="/approvals/{{ r.id }}/approve" data-ciba="Approve this request? You'll get a push on your enrolled device — open Auth0 Guardian to confirm." style="margin:0;">
                         <button type="submit" class="btn btn-small">Approve</button>
                     </form>
                     <form method="post" action="/approvals/{{ r.id }}/deny" onsubmit="return confirm('Deny this request?');" style="margin:0;">
