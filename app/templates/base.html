@@ -64,6 +64,16 @@
                 <a href="/profile" {% if active=='profile' %}class="active"{% endif %}>Profile</a>
                 <a href="/auth/logout">Logout</a>
             </div>
+            {% if ctx and ctx.user_organizations and ctx.user_organizations|length > 1 %}
+            <div class="org-switcher" title="Switch organization">
+                <select onchange="window.location.href = '/switch-org/' + this.value;">
+                    {% for o in ctx.user_organizations %}
+                    <option value="{{ o.id }}" {% if not ctx.aggregate_orgs and ctx.org_id == o.id %}selected{% endif %}>{{ o.display_name or o.name }}</option>
+                    {% endfor %}
+                    <option value="all" {% if ctx.aggregate_orgs %}selected{% endif %}>All my orgs ({{ ctx.user_organizations|length }})</option>
+                </select>
+            </div>
+            {% endif %}
             <div class="user-chip">
                 {% if user.picture %}<img src="{{ user.picture }}" alt="" class="avatar">{% endif %}
                 <span>{{ user.name or user.email }}</span>

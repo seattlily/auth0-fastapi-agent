@@ -149,6 +149,27 @@ async def get_organization_by_name(name: str) -> dict | None:
     return resp.json()
 
 
+async def list_user_organizations(user_id: str) -> list[dict]:
+    """Return the Auth0 Organizations a user is a member of.
+
+    Used so multi-org users (e.g. an agent shared between two travel
+    agencies) can switch between or aggregate across their orgs from
+    the app, instead of being pinned to whichever one Auth0 picked at
+    login.
+    """
+    token = await _get_management_token()
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        resp = await client.get(
+            f"{_api_base()}/users/{user_id}/organizations",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+    _raise_for_status(resp, "list user organizations")
+    data = resp.json()
+    if isinstance(data, dict):
+        return data.get("organizations") or []
+    return data or []
+
+
 async def list_user_enrollments(user_id: str) -> list[dict[str, Any]]:
     """List the Guardian factors the user has enrolled. Returns a
     possibly-empty list of enrollment records. Empty list means the

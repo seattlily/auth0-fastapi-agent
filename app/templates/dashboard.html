@@ -84,6 +84,14 @@
 
 {% elif ctx.role == 'travel_agent' %}
 
+{% if ctx.aggregate_orgs and ctx.user_organizations|length > 1 %}
+<div class="alert alert-info">
+    <strong>Viewing all your organizations.</strong> Trips, customers, pending approvals, and bookings are combined across {{ ctx.user_organizations|length }} orgs:
+    {% for o in ctx.user_organizations %}<code>{{ o.name }}</code>{% if not loop.last %} · {% endif %}{% endfor %}.
+    Use the org switcher in the top nav to focus on one org instead.
+</div>
+{% endif %}
+
 {% if my_company %}
 <div class="card-grid">
     <div class="kpi">
