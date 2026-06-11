@@ -401,6 +401,25 @@ register_auth_routes(auth_router, auth0_config)
 app.include_router(auth_router)
 
 
+# Graceful recovery for a dead-end the SDK leaves on the floor: when
+# the _a0_tx transaction cookie is stale, mismatched, or absent, the
+# SDK's /auth/callback raises a MissingTransactionError that surfaces
+# as a bare HTTP 400 with no way for the user to recover except by
+# manually clearing cookies. Instead, we delete the bad cookie and
+# bounce them back to /auth/login so a fresh transaction starts.
+from starlette.exceptions import HTTPException as _StarletteHTTPException
+from fastapi.exception_handlers import http_exception_handler
+
+
+@app.exception_handler(_StarletteHTTPException)
+async def _auth_callback_recovery(request: Request, exc: _StarletteHTTPException):
+    if request.url.path == "/auth/callback" and exc.status_code == 400:
+        resp = RedirectResponse(url="/auth/login", status_code=303)
+        resp.delete_cookie("_a0_tx", path="/")
+        return resp
+    return await http_exception_handler(request, exc)
+
+
 openai_client = AsyncOpenAI(
     api_key=os.environ["OPENAI_API_KEY"],
     base_url=os.environ.get("OPENAI_BASE_URL", "https://api.openai.com/v1"),
