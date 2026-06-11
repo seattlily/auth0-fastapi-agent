@@ -27,12 +27,14 @@ from mock_data import (
     add_experience,
     add_trip,
     get_agent,
+    get_agent_by_email,
     get_agents,
     get_approval_request,
     get_approval_requests,
     get_companies,
     get_company,
     get_customer,
+    get_customer_by_email,
     get_customers,
     get_document,
     get_documents,
@@ -563,6 +565,36 @@ async def require_login(request: Request, response: Response) -> tuple[dict, dic
     access_token, _ = _tokens_from_session(session)
     access_claims = decode_jwt_claims(access_token)
     ctx = get_user_context(access_claims, user or {})
+
+    # Email-based fallback for missing customer_id / agent_id claims.
+    # These are normally stamped onto the token by a post-login Auth0
+    # Action that copies app_metadata.{customer_id,agent_id}. If the
+    # Action isn't deployed or the metadata isn't set on a user, the
+    # demo would otherwise refuse to act ("missing customer_id").
+    # Fall back to looking the user up by their ID-token email so the
+    # flow keeps working — and log a console hint pointing the
+    # operator at the missing app_metadata field.
+    user_email = (user or {}).get("email") or ""
+    if ctx.get("role") == "customer" and not ctx.get("customer_id"):
+        cust = get_customer_by_email(user_email)
+        if cust:
+            ctx["customer_id"] = cust["id"]
+            if not ctx.get("org_name"):
+                ctx["org_name"] = cust.get("org_name") or ""
+            print(
+                f"[claims] customer_id missing on token for {user_email!r}; "
+                f"resolved {cust['id']!r} via email. Set "
+                f"app_metadata.customer_id on this Auth0 user to remove this fallback."
+            )
+    if ctx.get("role") == "travel_agent" and not ctx.get("agent_id"):
+        agent = get_agent_by_email(user_email)
+        if agent:
+            ctx["agent_id"] = agent["id"]
+            print(
+                f"[claims] agent_id missing on token for {user_email!r}; "
+                f"resolved {agent['id']!r} via email. Set "
+                f"app_metadata.agent_id on this Auth0 user to remove this fallback."
+            )
 
     # Resolve the user's company so templates can show the company
     # display_name as the primary brand instead of CompassZero.

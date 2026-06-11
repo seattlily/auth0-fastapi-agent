@@ -117,6 +117,24 @@ def get_customer(customer_id: str) -> Optional[dict]:
     return next((c for c in CUSTOMERS if c["id"] == customer_id), None)
 
 
+def get_customer_by_email(email: str) -> Optional[dict]:
+    e = (email or "").strip().lower()
+    if not e:
+        return None
+    return next(
+        (c for c in CUSTOMERS if (c.get("email") or "").lower() == e), None
+    )
+
+
+def get_agent_by_email(email: str) -> Optional[dict]:
+    e = (email or "").strip().lower()
+    if not e:
+        return None
+    return next(
+        (a for a in TRAVEL_AGENTS if (a.get("email") or "").lower() == e), None
+    )
+
+
 def get_trips(
     customer_id: Optional[str] = None,
     org_name: Optional[str] = None,
