@@ -294,6 +294,7 @@ table tbody tr:hover { background: var(--surface-alt); }
 .status-badge.booked    { background: #E7F0FE; color: #1D4ED8; }
 .status-badge.completed { background: #E5F8EC; color: #0E6B33; }
 .status-badge.cancelled { background: #FEEBEC; color: #B00020; }
+.status-badge.pending   { background: #FEF3C7; color: #92400E; }
 
 /* ---------- buttons ---------- */
 

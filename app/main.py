@@ -216,9 +216,15 @@ def _tool_status_badge(name: str) -> str:
     return f" `{' · '.join(tags)}`" if tags else ""
 
 
-def _build_bookings(trips: list[dict], experiences: list[dict]) -> list[dict]:
-    """Merge trips and standalone/attached experiences into one
-    chronological feed for the dashboard's recent-bookings table."""
+def _build_bookings(
+    trips: list[dict],
+    experiences: list[dict],
+    pending_requests: list[dict] | None = None,
+) -> list[dict]:
+    """Merge trips, experiences, and pending approval requests into one
+    chronological feed for the dashboard's recent-bookings table.
+    Pending requests render with status=\"pending\" and no detail link
+    (they aren't trip records yet — only become real on agent approval)."""
     bookings: list[dict] = []
     for t in trips:
         bookings.append(
@@ -254,7 +260,45 @@ def _build_bookings(trips: list[dict], experiences: list[dict]) -> list[dict]:
                 "location": e.get("location", ""),
             }
         )
-    bookings.sort(key=lambda b: b["primary_date"], reverse=True)
+    for r in pending_requests or []:
+        d = r.get("details") or {}
+        if r.get("kind") == "trip":
+            bookings.append(
+                {
+                    "id": r["id"],
+                    "kind": "trip",
+                    "type": d.get("type", "flight"),
+                    "customer_id": r["customer_id"],
+                    "summary": f"{d.get('origin','')} → {d.get('destination','')}",
+                    "primary_date": d.get("depart_date", ""),
+                    "date_label": (
+                        f"{d.get('depart_date','')} – {d.get('return_date','')}"
+                    ),
+                    "cost": float(d.get("cost") or 0),
+                    "currency": d.get("currency", "USD"),
+                    "status": "pending",
+                    "link": None,
+                    "location": "",
+                }
+            )
+        elif r.get("kind") == "experience":
+            bookings.append(
+                {
+                    "id": r["id"],
+                    "kind": "experience",
+                    "type": "activity",
+                    "customer_id": r["customer_id"],
+                    "summary": d.get("name", ""),
+                    "primary_date": d.get("date", ""),
+                    "date_label": d.get("date", ""),
+                    "cost": float(d.get("cost") or 0),
+                    "currency": "USD",
+                    "status": "pending",
+                    "link": None,
+                    "location": d.get("location", ""),
+                }
+            )
+    bookings.sort(key=lambda b: b["primary_date"] or "", reverse=True)
     return bookings
 GOOGLE_CONNECTION_SCOPES = [
     "https://www.googleapis.com/auth/calendar.events",
@@ -780,10 +824,10 @@ async def dashboard(request: Request, response: Response):
         customer_names = {c["id"]: c["name"] for c in customers}
         customer_ids = {c["id"] for c in customers}
         experiences = [e for e in EXPERIENCES if e["customer_id"] in customer_ids]
-        bookings = _build_bookings(trips, experiences)
         pending_approvals = (
             get_approval_requests(org_name=org, status="pending") if org else []
         )
+        bookings = _build_bookings(trips, experiences, pending_approvals)
         return templates.TemplateResponse(
             request=request,
             name="dashboard.html",
@@ -807,7 +851,12 @@ async def dashboard(request: Request, response: Response):
             if customer_id
             else []
         )
-        bookings = _build_bookings(trips, experiences)
+        pending_requests = (
+            get_approval_requests(customer_id=customer_id, status="pending")
+            if customer_id
+            else []
+        )
+        bookings = _build_bookings(trips, experiences, pending_requests)
         return templates.TemplateResponse(
             request=request,
             name="dashboard.html",
@@ -1068,17 +1117,46 @@ async def trips_page(request: Request, response: Response):
     if not user:
         return RedirectResponse(url="/auth/login")
 
+    pending_reqs: list[dict] = []
     if has_permission(ctx, "read:all_trips"):
         trips = get_trips()
+        pending_reqs = get_approval_requests(status="pending")
         scope_label = "all companies"
     elif has_permission(ctx, "read:company_trips") and ctx.get("org_name"):
         trips = get_trips(org_name=ctx["org_name"])
+        pending_reqs = get_approval_requests(
+            org_name=ctx["org_name"], status="pending"
+        )
         scope_label = ctx["org_name"]
     elif has_permission(ctx, "read:my_trips") and ctx.get("customer_id"):
         trips = get_trips(customer_id=ctx["customer_id"])
+        pending_reqs = get_approval_requests(
+            customer_id=ctx["customer_id"], status="pending"
+        )
         scope_label = "your bookings"
     else:
         return RedirectResponse(url="/dashboard")
+
+    # Render pending TRIP requests as trip-shaped rows so the trips
+    # table can display them inline. Pending experience requests live
+    # on the dashboard's bookings feed, not /trips.
+    pending_rows = [
+        {
+            "id": r["id"],
+            "type": (r.get("details") or {}).get("type", "flight"),
+            "customer_id": r["customer_id"],
+            "origin": (r.get("details") or {}).get("origin", ""),
+            "destination": (r.get("details") or {}).get("destination", ""),
+            "depart_date": (r.get("details") or {}).get("depart_date", ""),
+            "return_date": (r.get("details") or {}).get("return_date", ""),
+            "cost": float((r.get("details") or {}).get("cost") or 0),
+            "currency": (r.get("details") or {}).get("currency", "USD"),
+            "status": "pending",
+        }
+        for r in pending_reqs
+        if r.get("kind") == "trip"
+    ]
+    all_rows = list(trips) + pending_rows
 
     customer_names = {c["id"]: c["name"] for c in get_customers()}
     return templates.TemplateResponse(
@@ -1087,7 +1165,9 @@ async def trips_page(request: Request, response: Response):
         context={
             "user": user,
             "ctx": ctx,
-            "trips": sorted(trips, key=lambda t: t["depart_date"], reverse=True),
+            "trips": sorted(
+                all_rows, key=lambda t: t.get("depart_date") or "", reverse=True
+            ),
             "customer_names": customer_names,
             "scope_label": scope_label,
         },

@@ -15,7 +15,13 @@
         <tbody>
         {% for t in trips %}
             <tr>
-                <td><a href="/trips/{{ t.id }}"><code>{{ t.id }}</code></a></td>
+                <td>
+                    {% if t.status == 'pending' %}
+                    <code title="Pending agent approval — not yet a trip">{{ t.id }}</code>
+                    {% else %}
+                    <a href="/trips/{{ t.id }}"><code>{{ t.id }}</code></a>
+                    {% endif %}
+                </td>
                 <td>{{ t.type }}</td>
                 <td>{{ customer_names.get(t.customer_id, t.customer_id) }}</td>
                 <td>{{ t.origin }} → {{ t.destination }}</td>

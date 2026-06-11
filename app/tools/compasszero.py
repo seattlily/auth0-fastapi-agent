@@ -23,6 +23,7 @@ from mock_data import (
     add_experience,
     add_travel_agent,
     add_trip,
+    get_approval_requests,
     get_companies,
     get_company,
     get_customer,
@@ -75,6 +76,37 @@ async def list_all_customers(args: dict, ctx: dict) -> str:
 async def list_companies(args: dict, ctx: dict) -> str:
     require(ctx, "read:all_companies")
     return json.dumps(get_companies())
+
+
+async def list_pending_requests(args: dict, ctx: dict) -> str:
+    """Return pending trip / experience approval requests scoped to the
+    caller's role:
+
+    - admin    → all pending requests across every org
+    - agent    → pending requests in the agent's current org
+                 (these are the ones awaiting their approval)
+    - customer → just their own pending requests
+
+    The chat assistant has no other way to read APPROVAL_REQUESTS, so
+    this is the tool to call whenever the user asks about \"pending
+    trips\", \"requests waiting on approval\", \"did my request go
+    through?\", etc.
+    """
+    require(ctx, "read:my_company")
+    role = ctx.get("role")
+    if role == "compass_admin":
+        return json.dumps(get_approval_requests(status="pending"))
+    if role == "travel_agent":
+        org = ctx.get("org_name")
+        if not org:
+            return json.dumps({"error": "no org_name on user — log in via your travel agency's organization"})
+        return json.dumps(get_approval_requests(org_name=org, status="pending"))
+    if role == "customer":
+        cid = ctx.get("customer_id")
+        if not cid:
+            return json.dumps({"error": "no customer_id on user — ask an admin to set app_metadata.customer_id"})
+        return json.dumps(get_approval_requests(customer_id=cid, status="pending"))
+    return json.dumps({"error": f"role '{role}' cannot list pending requests"})
 
 
 # ---------- write tools ----------
@@ -819,6 +851,29 @@ TOOLS: dict[str, dict] = {
             "function": {
                 "name": "list_companies",
                 "description": "List every CompassZero organization with budget vs. spent. Admin-only.",
+                "parameters": {"type": "object", "properties": {}},
+            },
+        },
+    },
+    "list_pending_requests": {
+        "required_scopes": ("read:my_company",),
+        "fn": list_pending_requests,
+        "schema": {
+            "type": "function",
+            "function": {
+                "name": "list_pending_requests",
+                "description": (
+                    "List pending trip and experience approval requests "
+                    "(submitted by customers via request_trip / "
+                    "request_experience, awaiting an agent's decision). "
+                    "Use whenever the user asks about 'pending trips', "
+                    "'pending requests', 'awaiting approval', 'did my "
+                    "request go through?', or any variation. Customers see "
+                    "their own; travel agents see ones in their org "
+                    "awaiting their approval; admins see everything. The "
+                    "tool auto-scopes by role — never prompt the user for "
+                    "org_name or customer_id."
+                ),
                 "parameters": {"type": "object", "properties": {}},
             },
         },
