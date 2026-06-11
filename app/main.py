@@ -53,11 +53,9 @@ from tools.auth0_management import (
     create_enrollment_ticket,
     create_organization,
     delete_organization,
-    find_user_by_email,
     get_organization_by_name,
     list_organization_members,
     list_user_enrollments,
-    list_user_organizations,
     reconcile_companies_with_auth0,
     sync_status,
 )
@@ -94,78 +92,47 @@ MAX_TOOL_ITERATIONS = 4
 # Per-org visual overrides — when set, the user's templates render with
 # a different primary/accent and an org-supplied logo next to the brand
 # mark. Demonstrates per-tenant theming on top of Auth0 Organizations.
-# Keys may be Auth0 `org_id` (e.g. "org_aGUHzOkqG9Volr3d"), the org
-# slug `org_name` (e.g. "globex-ltd"), or a slugified display_name
-# (e.g. "acme-inc"). The runtime lookup tries org_id, then
-# org_name (case-sensitive then lowercased), then a slugified
-# company display_name — so a recreated Auth0 org with a new id
-# still finds its theme as long as ONE of them matches.
-_GLOBEX_BRAND = {
-    "primary": "#9dd600",
-    "primary_dark": "#7db300",
-    "primary_soft": "#eefadf",
-    "secondary": "#7dc2d8",
-    "secondary_soft": "#e6f4f9",
-    "logo_url": (
-        "https://img.magnific.com/free-vector/"
-        "globe-grid-earth_78370-7981.jpg?w=360"
-    ),
-}
-_NORTHWIND_BRAND = {
-    "primary": "#030a2b",
-    "primary_dark": "#020618",
-    "primary_soft": "#e6e8ee",
-    "secondary": "#565252",
-    "secondary_soft": "#ececec",
-    "logo_url": (
-        "https://media.istockphoto.com/id/1127367066/vector/"
-        "north-arrow-icon-or-n-direction-and-navigation-point-"
-        "symbol-vector-logo-in-circle-for-gps.jpg"
-        "?s=612x612&w=0&k=20&c=ynSV8xSAVPeGXRthPnrfuezFd7BGNJ0okpiEjdY5H00="
-    ),
-}
-_ACME_BRAND = {
-    "primary": "#242b61",
-    "primary_dark": "#1a2049",
-    "primary_soft": "#e8eaf3",
-    "secondary": "#e4dddd",
-    "secondary_soft": "#f1ecec",
-    "logo_url": (
-        "https://i.fbcd.co/products/original/"
-        "logo-88d7008f5b8d759cec9c792bc69657ebd6ce2c9c336c183e9c262defb7d5e2d3.jpg"
-    ),
-}
-
+# Keys may be either Auth0 `org_id` (e.g. "org_aGUHzOkqG9Volr3d") or
+# the org slug `org_name` (e.g. "globex-ltd"). The runtime lookup
+# checks org_id first, then org_name — so a recreated Auth0 org with
+# a new id still finds its theme as long as one of them matches.
 BRAND_OVERRIDES: dict[str, dict[str, str]] = {
-    # Globex — match by slug
-    "globex-ltd": _GLOBEX_BRAND,
-    # Northwind — match by slug
-    "northwind-corp": _NORTHWIND_BRAND,
-    # Acme — match by either current Auth0 org_id (in case the org was
-    # recreated and got a new id) or by the slug. Add additional ids
-    # here if the Acme org is recreated again.
-    "org_aGUHzOkqG9Volr3d": _ACME_BRAND,
-    "acme-inc": _ACME_BRAND,
+    "globex-ltd": {
+        "primary": "#9dd600",
+        "primary_dark": "#7db300",
+        "primary_soft": "#eefadf",
+        "secondary": "#7dc2d8",
+        "secondary_soft": "#e6f4f9",
+        "logo_url": (
+            "https://img.magnific.com/free-vector/"
+            "globe-grid-earth_78370-7981.jpg?w=360"
+        ),
+    },
+    "northwind-corp": {
+        "primary": "#030a2b",
+        "primary_dark": "#020618",
+        "primary_soft": "#e6e8ee",
+        "secondary": "#565252",
+        "secondary_soft": "#ececec",
+        "logo_url": (
+            "https://media.istockphoto.com/id/1127367066/vector/"
+            "north-arrow-icon-or-n-direction-and-navigation-point-"
+            "symbol-vector-logo-in-circle-for-gps.jpg"
+            "?s=612x612&w=0&k=20&c=ynSV8xSAVPeGXRthPnrfuezFd7BGNJ0okpiEjdY5H00="
+        ),
+    },
+    "org_aGUHzOkqG9Volr3d": {
+        "primary": "#242b61",
+        "primary_dark": "#1a2049",
+        "primary_soft": "#e8eaf3",
+        "secondary": "#e4dddd",
+        "secondary_soft": "#f1ecec",
+        "logo_url": (
+            "https://i.fbcd.co/products/original/"
+            "logo-88d7008f5b8d759cec9c792bc69657ebd6ce2c9c336c183e9c262defb7d5e2d3.jpg"
+        ),
+    },
 }
-
-
-def _resolve_brand(ctx: dict) -> dict | None:
-    """Resolve the per-org theme dict. Tries org_id, org_name (exact
-    then lowercased), and a slugified company display_name as a final
-    fallback. Returns None if nothing matches."""
-    candidates: list[str] = []
-    org_id = ctx.get("org_id") or ""
-    org_name = ctx.get("org_name") or ""
-    display = ctx.get("company_display_name") or ""
-    candidates.append(org_id)
-    candidates.append(org_name)
-    candidates.append(org_name.lower())
-    if display:
-        candidates.append(display.lower().replace(" ", "-"))
-    for key in candidates:
-        if key and key in BRAND_OVERRIDES:
-            return BRAND_OVERRIDES[key]
-    return None
 
 
 CIBA_GATED_CHAT_TOOLS = {
@@ -449,54 +416,19 @@ def _ensure_seed_documents() -> None:
         )
 
 
-def _effective_org_names(ctx: dict) -> list[str]:
-    """Org slugs the current user wants to act over right now.
-
-    - Single-org agents/customers: just their token's `org_name`.
-    - Multi-org agents in default mode: still just their current org
-      (whichever Auth0 selected at login; switcher re-auths to change).
-    - Multi-org agents who toggled \"All my orgs\": every membership.
-    Admins should not call this — they see everything anyway.
-    """
-    if ctx.get("aggregate_orgs"):
-        names: list[str] = []
-        for o in ctx.get("user_organizations") or []:
-            n = o.get("name")
-            if n and n not in names:
-                names.append(n)
-        return names
-    org = ctx.get("org_name")
-    return [org] if org else []
-
-
 def _docs_visible_to(ctx: dict) -> list[dict]:
     role = ctx.get("role")
     if role == "compass_admin":
         return list(DOCUMENTS)
     if role == "travel_agent":
-        orgs = set(_effective_org_names(ctx))
-        if not orgs:
-            return []
-        return [d for d in DOCUMENTS if d.get("org_name") in orgs]
+        org = ctx.get("org_name") or ""
+        return [d for d in DOCUMENTS if d.get("org_name") == org]
     if role == "customer":
         cid = ctx.get("customer_id") or ""
-        org = ctx.get("org_name") or ""
-        if not cid or not org:
-            # Missing claim — show nothing rather than risk matching
-            # stray docs whose customer_id happens to be the empty
-            # string (e.g. uploaded files).
-            return []
-        # Belt-and-suspenders: customer_id AND org_name must both match.
-        # Defends against an Auth0 misconfig where customer_id was
-        # accidentally set to another customer's id — the user's
-        # Organization claim is independent and would still be theirs,
-        # so we never leak across orgs even if customer_id is wrong.
         return [
             d
             for d in DOCUMENTS
-            if d["kind"] == "invoice"
-            and d.get("customer_id") == cid
-            and d.get("org_name") == org
+            if d["kind"] == "invoice" and d.get("customer_id") == cid
         ]
     return []
 
@@ -506,17 +438,11 @@ def _user_can_view_doc(ctx: dict, doc: dict) -> bool:
     if role == "compass_admin":
         return True
     if role == "travel_agent":
-        orgs = set(_effective_org_names(ctx))
-        return bool(orgs) and doc.get("org_name") in orgs
+        return doc.get("org_name") == ctx.get("org_name")
     if role == "customer":
-        cid = ctx.get("customer_id")
-        org = ctx.get("org_name")
         return (
-            bool(cid)
-            and bool(org)
-            and doc["kind"] == "invoice"
-            and doc.get("customer_id") == cid
-            and doc.get("org_name") == org
+            doc["kind"] == "invoice"
+            and doc.get("customer_id") == ctx.get("customer_id")
         )
     return False
 
@@ -600,44 +526,22 @@ async def require_login(request: Request, response: Response) -> tuple[dict, dic
         company = get_company(org_name=org)
         if company:
             ctx["company_display_name"] = company["display_name"]
-    brand = _resolve_brand(ctx)
+    brand = (
+        BRAND_OVERRIDES.get(ctx.get("org_id") or "")
+        or BRAND_OVERRIDES.get(ctx.get("org_name") or "")
+    )
     if brand:
         ctx["brand"] = brand
-    elif ctx.get("org_id") or ctx.get("org_name"):
-        # Emit a console hint so the operator can see exactly which
-        # keys to add to BRAND_OVERRIDES — much faster than digging
-        # through /profile.
-        print(
-            "[branding] no theme for "
-            f"org_id={ctx.get('org_id')!r} "
-            f"org_name={ctx.get('org_name')!r} "
-            f"display={ctx.get('company_display_name')!r}"
-        )
 
     # Per-user app-state isolation: Starlette's SessionMiddleware cookie
     # is independent of the SDK's session, so app state (conversation,
-    # pending_connect, cached org memberships) survives a logout. Reset
-    # whenever the signed-in user changes.
+    # pending_connect) survives a logout. Reset whenever the signed-in
+    # user changes.
     sub = (user or {}).get("sub") or ""
     if request.session.get("conversation_owner") != sub:
         request.session["conversation_owner"] = sub
         request.session["conversation"] = []
         request.session.pop("pending_connect", None)
-        request.session.pop("user_organizations", None)
-        request.session.pop("aggregate_orgs", None)
-
-    # Multi-org membership lookup (cached on the session). Lets the
-    # nav surface a switcher when a user belongs to 2+ Auth0 Orgs and
-    # lets them flip into an "aggregate across all my orgs" view.
-    if user and "user_organizations" not in request.session:
-        try:
-            request.session["user_organizations"] = (
-                await list_user_organizations(sub) if sub else []
-            )
-        except ManagementError:
-            request.session["user_organizations"] = []
-    ctx["user_organizations"] = request.session.get("user_organizations", []) or []
-    ctx["aggregate_orgs"] = bool(request.session.get("aggregate_orgs", False))
 
     return user, session, ctx
 
@@ -758,65 +662,6 @@ async def home(request: Request, response: Response):
     return templates.TemplateResponse(request=request, name="home.html")
 
 
-@app.post("/signin")
-async def signin(request: Request):
-    """Email-driven HRD entry point.
-
-    Looks the email up in Auth0 (Management API users-by-email),
-    enumerates the user's Auth0 Organizations, and routes:
-
-      - 0 orgs (or unknown email): standard /auth/login (universal
-        login + admin/Okta path).
-      - 1 org: /auth/login?organization=<id>&login_hint=<email>.
-      - 2+ orgs: render the org-picker page so the user can pick
-        which one to log into.
-
-    Email entry doesn't authenticate anything by itself — it just
-    pre-selects the Auth0 Organization context so the credentials
-    page is correctly scoped.
-    """
-    from urllib.parse import quote_plus, urlencode as _urlencode
-
-    form = await request.form()
-    email = (form.get("email") or "").strip().lower()
-    if not email:
-        return RedirectResponse(url="/?error=email+required", status_code=303)
-
-    user_record: dict | None = None
-    try:
-        user_record = await find_user_by_email(email)
-    except ManagementError:
-        user_record = None
-
-    orgs: list[dict] = []
-    if user_record and user_record.get("user_id"):
-        try:
-            orgs = await list_user_organizations(user_record["user_id"])
-        except ManagementError:
-            orgs = []
-
-    if not orgs:
-        # Unknown email or admin-style account with no org — fall
-        # through to the universal Auth0 login. login_hint pre-fills
-        # the email entry on the universal page if Auth0 supports it.
-        return RedirectResponse(
-            url=f"/auth/login?login_hint={quote_plus(email)}",
-            status_code=303,
-        )
-
-    if len(orgs) == 1:
-        params = _urlencode(
-            {"organization": orgs[0]["id"], "login_hint": email}
-        )
-        return RedirectResponse(url=f"/auth/login?{params}", status_code=303)
-
-    return templates.TemplateResponse(
-        request=request,
-        name="org_picker.html",
-        context={"email": email, "orgs": orgs},
-    )
-
-
 @app.get("/connect/google-calendar")
 async def connect_google_calendar(request: Request):
     from urllib.parse import urlencode
@@ -884,28 +729,17 @@ async def dashboard(request: Request, response: Response):
         )
 
     if role == "travel_agent":
-        orgs = _effective_org_names(ctx)
-        # When aggregating across multiple orgs, drop the "Your
-        # organization" KPI (each org has its own budget) and let the
-        # template fall back to the multi-org banner.
-        if ctx.get("aggregate_orgs") and len(orgs) > 1:
-            my_company = None
-        else:
-            my_company = get_company(org_name=orgs[0]) if orgs else None
-        trips: list[dict] = []
-        customers: list[dict] = []
-        for o in orgs:
-            trips.extend(get_trips(org_name=o))
-            customers.extend(get_customers(org_name=o))
+        org = ctx.get("org_name")
+        my_company = get_company(org_name=org) if org else None
+        trips = get_trips(org_name=org) if org else []
+        customers = get_customers(org_name=org) if org else []
         customer_names = {c["id"]: c["name"] for c in customers}
         customer_ids = {c["id"] for c in customers}
         experiences = [e for e in EXPERIENCES if e["customer_id"] in customer_ids]
         bookings = _build_bookings(trips, experiences)
-        pending_approvals: list[dict] = []
-        for o in orgs:
-            pending_approvals.extend(
-                get_approval_requests(org_name=o, status="pending")
-            )
+        pending_approvals = (
+            get_approval_requests(org_name=org, status="pending") if org else []
+        )
         return templates.TemplateResponse(
             request=request,
             name="dashboard.html",
@@ -1158,16 +992,10 @@ async def customers_page(request: Request, response: Response):
 
     if has_permission(ctx, "read:all_customers"):
         customers = get_customers()
-        scope_label = "all organizations"
+        scope_label = "all companies"
     else:
-        orgs = _effective_org_names(ctx)
-        customers = []
-        for o in orgs:
-            customers.extend(get_customers(org_name=o))
-        if ctx.get("aggregate_orgs") and len(orgs) > 1:
-            scope_label = f"{len(orgs)} organizations (combined)"
-        else:
-            scope_label = (orgs[0] if orgs else None) or "your organization"
+        customers = get_customers(org_name=ctx.get("org_name"))
+        scope_label = ctx.get("org_name") or "your organization"
 
     company_names = {c["org_name"]: c["display_name"] for c in get_companies()}
     agent_names = {a["id"]: a["name"] for a in TRAVEL_AGENTS}
@@ -1198,18 +1026,10 @@ async def trips_page(request: Request, response: Response):
 
     if has_permission(ctx, "read:all_trips"):
         trips = get_trips()
-        scope_label = "all organizations"
-    elif has_permission(ctx, "read:company_trips"):
-        orgs = _effective_org_names(ctx)
-        if not orgs:
-            return RedirectResponse(url="/dashboard")
-        trips = []
-        for o in orgs:
-            trips.extend(get_trips(org_name=o))
-        if ctx.get("aggregate_orgs") and len(orgs) > 1:
-            scope_label = f"{len(orgs)} organizations (combined)"
-        else:
-            scope_label = orgs[0]
+        scope_label = "all companies"
+    elif has_permission(ctx, "read:company_trips") and ctx.get("org_name"):
+        trips = get_trips(org_name=ctx["org_name"])
+        scope_label = ctx["org_name"]
     elif has_permission(ctx, "read:my_trips") and ctx.get("customer_id"):
         trips = get_trips(customer_id=ctx["customer_id"])
         scope_label = "your bookings"
@@ -1715,40 +1535,6 @@ async def documents_page(request: Request, response: Response):
     else:
         scope_label = "your invoices"
 
-    # Diagnostic: surface a hint if a customer's token claims point
-    # at a customer record that doesn't exist or is in a different
-    # organization. Almost always an Auth0 app_metadata copy/paste
-    # mistake — much faster to spot here than chasing why invoices
-    # don't render.
-    claim_warning: str | None = None
-    if ctx.get("role") == "customer":
-        cid = ctx.get("customer_id") or ""
-        org = ctx.get("org_name") or ""
-        if not cid:
-            claim_warning = (
-                "Your access token has no `customer_id` claim. Set "
-                "`app_metadata.customer_id` on this Auth0 user (the "
-                "post-login Action propagates it to the token) and "
-                "log out/back in."
-            )
-        else:
-            cust = get_customer(cid)
-            if not cust:
-                claim_warning = (
-                    f"Your token's `customer_id` is {cid}, which "
-                    "doesn't match any customer record. Fix "
-                    "`app_metadata.customer_id` in the Auth0 dashboard."
-                )
-            elif org and cust.get("org_name") != org:
-                claim_warning = (
-                    f"Your token's `customer_id` ({cid}) belongs to "
-                    f"organization '{cust.get('org_name')}', but you're "
-                    f"signed into '{org}'. The Auth0 user's "
-                    "`app_metadata.customer_id` is set to the wrong "
-                    "customer — fix it in the Auth0 dashboard, then "
-                    "log out and back in."
-                )
-
     return templates.TemplateResponse(
         request=request,
         name="documents.html",
@@ -1763,7 +1549,6 @@ async def documents_page(request: Request, response: Response):
             "company_names": company_names,
             "error": request.query_params.get("error"),
             "success": request.query_params.get("success"),
-            "claim_warning": claim_warning,
         },
     )
 
@@ -1890,7 +1675,7 @@ async def approvals_approve(
             url=f"/dashboard?error=request+already+{req['status']}",
             status_code=303,
         )
-    if req.get("org_name") not in set(_effective_org_names(ctx)):
+    if req.get("org_name") != ctx.get("org_name"):
         return RedirectResponse(
             url="/dashboard?error=request+is+outside+your+organization",
             status_code=303,
@@ -1993,7 +1778,7 @@ async def approvals_deny(
             url=f"/dashboard?error=request+already+{req['status']}",
             status_code=303,
         )
-    if req.get("org_name") not in set(_effective_org_names(ctx)):
+    if req.get("org_name") != ctx.get("org_name"):
         return RedirectResponse(
             url="/dashboard?error=request+is+outside+your+organization",
             status_code=303,

@@ -10,13 +10,9 @@
     <div class="landing">
         <h1>Compass<span class="compass">Zero</span></h1>
         <p>Travel management for B2B teams. Book on behalf of customers, track organization budgets, and let an AI agent handle the busywork — all under permission scopes you control in Auth0.</p>
-        <form method="post" action="/signin" class="signin-form">
-            <input type="email" name="email" placeholder="you@your-organization.com" autocomplete="email" required>
-            <button type="submit" class="btn">Sign in</button>
-        </form>
-        <p style="margin-top: 0.6rem; font-size: 0.82rem; color: var(--muted);">We'll route you to the right organization based on your email.</p>
+        <a href="/auth/login" class="btn">Sign in</a>
         {% if admin_connection_name %}
-        <p style="margin-top: 1.25rem; font-size: 0.88rem;">
+        <p style="margin-top: 1rem; font-size: 0.88rem;">
             <a href="/auth/login?connection={{ admin_connection_name }}" style="color: var(--muted);">CompassZero staff? Sign in via {{ admin_connection_label }} →</a>
         </p>
         {% endif %}
