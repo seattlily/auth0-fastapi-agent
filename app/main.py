@@ -56,6 +56,7 @@ from tools.auth0_management import (
     get_organization_by_name,
     list_organization_members,
     list_user_enrollments,
+    list_user_organizations,
     reconcile_companies_with_auth0,
     sync_status,
 )
@@ -535,13 +536,26 @@ async def require_login(request: Request, response: Response) -> tuple[dict, dic
 
     # Per-user app-state isolation: Starlette's SessionMiddleware cookie
     # is independent of the SDK's session, so app state (conversation,
-    # pending_connect) survives a logout. Reset whenever the signed-in
-    # user changes.
+    # pending_connect, cached org memberships) survives a logout. Reset
+    # whenever the signed-in user changes.
     sub = (user or {}).get("sub") or ""
     if request.session.get("conversation_owner") != sub:
         request.session["conversation_owner"] = sub
         request.session["conversation"] = []
         request.session.pop("pending_connect", None)
+        request.session.pop("user_organizations", None)
+
+    # Multi-org membership lookup, cached on the session so we hit
+    # the Management API once per login. Surfaces the top-nav
+    # switcher when the user belongs to 2+ Auth0 Organizations.
+    if user and "user_organizations" not in request.session:
+        try:
+            request.session["user_organizations"] = (
+                await list_user_organizations(sub) if sub else []
+            )
+        except ManagementError:
+            request.session["user_organizations"] = []
+    ctx["user_organizations"] = request.session.get("user_organizations", []) or []
 
     return user, session, ctx
 
@@ -671,6 +685,36 @@ async def connect_google_calendar(request: Request):
         "connection_scope": " ".join(GOOGLE_CONNECTION_SCOPES),
     }
     return RedirectResponse(url=f"/auth/login?{urlencode(params)}")
+
+
+@app.get("/switch-org/{org_id}")
+async def switch_org(request: Request, org_id: str):
+    """Re-auth into a different Auth0 Organization.
+
+    The SDK's `/auth/login` route forwards arbitrary query params to
+    `/authorize`, so passing `organization=<id>` here lands the user
+    on Auth0's universal login scoped to that org. If they have an
+    active SSO session, Auth0 silently re-issues a token with the
+    new `org_id` / `org_name` claims; otherwise they re-enter
+    credentials against that org's connections.
+
+    Guards: caller must already be logged in, and `org_id` must be
+    one of the user's cached memberships — never trust the path
+    parameter to grant access to an org the user isn't in.
+    """
+    user = await _get_user(request, Response())
+    if not user:
+        return RedirectResponse(url="/auth/login")
+
+    memberships = request.session.get("user_organizations") or []
+    member_ids = {o.get("id") for o in memberships if o.get("id")}
+    if org_id not in member_ids:
+        return RedirectResponse(url="/dashboard")
+
+    # Conversation is scoped to whichever org context the user is
+    # acting in — clear it on a switch so the next org starts fresh.
+    request.session["conversation"] = []
+    return RedirectResponse(url=f"/auth/login?organization={org_id}")
 
 
 @app.get("/dashboard")

@@ -141,6 +141,25 @@ pre {
     transition: box-shadow 120ms ease;
 }
 .user-chip:hover { box-shadow: var(--shadow-md); }
+.org-switcher {
+    margin-right: 0.5rem;
+}
+.org-switcher select {
+    padding: 0.35rem 1.6rem 0.35rem 0.75rem;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-pill);
+    background: var(--surface);
+    font-family: var(--font);
+    font-size: 0.85rem;
+    color: var(--text);
+    cursor: pointer;
+    appearance: none;
+    background-image: linear-gradient(45deg, transparent 50%, var(--muted) 50%), linear-gradient(135deg, var(--muted) 50%, transparent 50%);
+    background-position: calc(100% - 14px) 50%, calc(100% - 9px) 50%;
+    background-size: 5px 5px, 5px 5px;
+    background-repeat: no-repeat;
+}
+.org-switcher select:hover { box-shadow: var(--shadow-sm); }
 .avatar { width: 28px; height: 28px; border-radius: 50%; object-fit: cover; }
 .role-badge {
     display: inline-block;
