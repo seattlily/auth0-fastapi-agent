@@ -569,6 +569,64 @@ table tbody tr:hover { background: var(--surface-alt); }
 .landing .feature h3 { font-size: 1rem; margin-bottom: 0.4rem; color: var(--text); }
 .landing .feature p { font-size: 0.92rem; margin-bottom: 0; color: var(--muted); }
 
+/* Email entry on the landing page (HRD pre-login) */
+.landing .signin-form {
+    display: flex;
+    gap: 0.5rem;
+    margin: 1rem auto 0;
+    max-width: 380px;
+}
+.landing .signin-form input[type=email] {
+    flex: 1;
+    padding: 0.7rem 0.95rem;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    font-family: var(--font);
+    font-size: 0.95rem;
+    background: var(--surface);
+}
+.landing .signin-form input[type=email]:focus {
+    outline: none;
+    border-color: var(--brand);
+    box-shadow: 0 0 0 3px var(--brand-soft);
+}
+
+/* Pre-login org-picker tiles */
+.org-tile {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 0.95rem 1.1rem;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    text-decoration: none;
+    color: var(--text);
+    text-align: left;
+    transition: border-color 120ms ease, box-shadow 120ms ease, transform 120ms ease;
+}
+.org-tile:hover {
+    border-color: var(--brand);
+    box-shadow: var(--shadow-md);
+    transform: translateY(-1px);
+}
+.org-tile-name {
+    font-weight: 600;
+    font-size: 1rem;
+    flex: 1;
+}
+.org-tile-slug {
+    font-size: 0.78rem;
+    color: var(--muted);
+    margin-right: 0.5rem;
+}
+.org-tile-arrow {
+    color: var(--muted);
+    font-size: 1.1rem;
+    transition: transform 120ms ease, color 120ms ease;
+}
+.org-tile:hover .org-tile-arrow { color: var(--brand); transform: translateX(2px); }
+
 /* ---------- connections (provider cards) ---------- */
 
 .provider-grid {

@@ -53,6 +53,7 @@ from tools.auth0_management import (
     create_enrollment_ticket,
     create_organization,
     delete_organization,
+    find_user_by_email,
     get_organization_by_name,
     list_organization_members,
     list_user_enrollments,
@@ -93,47 +94,78 @@ MAX_TOOL_ITERATIONS = 4
 # Per-org visual overrides — when set, the user's templates render with
 # a different primary/accent and an org-supplied logo next to the brand
 # mark. Demonstrates per-tenant theming on top of Auth0 Organizations.
-# Keys may be either Auth0 `org_id` (e.g. "org_aGUHzOkqG9Volr3d") or
-# the org slug `org_name` (e.g. "globex-ltd"). The runtime lookup
-# checks org_id first, then org_name — so a recreated Auth0 org with
-# a new id still finds its theme as long as one of them matches.
-BRAND_OVERRIDES: dict[str, dict[str, str]] = {
-    "globex-ltd": {
-        "primary": "#9dd600",
-        "primary_dark": "#7db300",
-        "primary_soft": "#eefadf",
-        "secondary": "#7dc2d8",
-        "secondary_soft": "#e6f4f9",
-        "logo_url": (
-            "https://img.magnific.com/free-vector/"
-            "globe-grid-earth_78370-7981.jpg?w=360"
-        ),
-    },
-    "northwind-corp": {
-        "primary": "#030a2b",
-        "primary_dark": "#020618",
-        "primary_soft": "#e6e8ee",
-        "secondary": "#565252",
-        "secondary_soft": "#ececec",
-        "logo_url": (
-            "https://media.istockphoto.com/id/1127367066/vector/"
-            "north-arrow-icon-or-n-direction-and-navigation-point-"
-            "symbol-vector-logo-in-circle-for-gps.jpg"
-            "?s=612x612&w=0&k=20&c=ynSV8xSAVPeGXRthPnrfuezFd7BGNJ0okpiEjdY5H00="
-        ),
-    },
-    "org_aGUHzOkqG9Volr3d": {
-        "primary": "#242b61",
-        "primary_dark": "#1a2049",
-        "primary_soft": "#e8eaf3",
-        "secondary": "#e4dddd",
-        "secondary_soft": "#f1ecec",
-        "logo_url": (
-            "https://i.fbcd.co/products/original/"
-            "logo-88d7008f5b8d759cec9c792bc69657ebd6ce2c9c336c183e9c262defb7d5e2d3.jpg"
-        ),
-    },
+# Keys may be Auth0 `org_id` (e.g. "org_aGUHzOkqG9Volr3d"), the org
+# slug `org_name` (e.g. "globex-ltd"), or a slugified display_name
+# (e.g. "acme-inc"). The runtime lookup tries org_id, then
+# org_name (case-sensitive then lowercased), then a slugified
+# company display_name — so a recreated Auth0 org with a new id
+# still finds its theme as long as ONE of them matches.
+_GLOBEX_BRAND = {
+    "primary": "#9dd600",
+    "primary_dark": "#7db300",
+    "primary_soft": "#eefadf",
+    "secondary": "#7dc2d8",
+    "secondary_soft": "#e6f4f9",
+    "logo_url": (
+        "https://img.magnific.com/free-vector/"
+        "globe-grid-earth_78370-7981.jpg?w=360"
+    ),
 }
+_NORTHWIND_BRAND = {
+    "primary": "#030a2b",
+    "primary_dark": "#020618",
+    "primary_soft": "#e6e8ee",
+    "secondary": "#565252",
+    "secondary_soft": "#ececec",
+    "logo_url": (
+        "https://media.istockphoto.com/id/1127367066/vector/"
+        "north-arrow-icon-or-n-direction-and-navigation-point-"
+        "symbol-vector-logo-in-circle-for-gps.jpg"
+        "?s=612x612&w=0&k=20&c=ynSV8xSAVPeGXRthPnrfuezFd7BGNJ0okpiEjdY5H00="
+    ),
+}
+_ACME_BRAND = {
+    "primary": "#242b61",
+    "primary_dark": "#1a2049",
+    "primary_soft": "#e8eaf3",
+    "secondary": "#e4dddd",
+    "secondary_soft": "#f1ecec",
+    "logo_url": (
+        "https://i.fbcd.co/products/original/"
+        "logo-88d7008f5b8d759cec9c792bc69657ebd6ce2c9c336c183e9c262defb7d5e2d3.jpg"
+    ),
+}
+
+BRAND_OVERRIDES: dict[str, dict[str, str]] = {
+    # Globex — match by slug
+    "globex-ltd": _GLOBEX_BRAND,
+    # Northwind — match by slug
+    "northwind-corp": _NORTHWIND_BRAND,
+    # Acme — match by either current Auth0 org_id (in case the org was
+    # recreated and got a new id) or by the slug. Add additional ids
+    # here if the Acme org is recreated again.
+    "org_aGUHzOkqG9Volr3d": _ACME_BRAND,
+    "acme-inc": _ACME_BRAND,
+}
+
+
+def _resolve_brand(ctx: dict) -> dict | None:
+    """Resolve the per-org theme dict. Tries org_id, org_name (exact
+    then lowercased), and a slugified company display_name as a final
+    fallback. Returns None if nothing matches."""
+    candidates: list[str] = []
+    org_id = ctx.get("org_id") or ""
+    org_name = ctx.get("org_name") or ""
+    display = ctx.get("company_display_name") or ""
+    candidates.append(org_id)
+    candidates.append(org_name)
+    candidates.append(org_name.lower())
+    if display:
+        candidates.append(display.lower().replace(" ", "-"))
+    for key in candidates:
+        if key and key in BRAND_OVERRIDES:
+            return BRAND_OVERRIDES[key]
+    return None
 
 
 CIBA_GATED_CHAT_TOOLS = {
@@ -568,12 +600,19 @@ async def require_login(request: Request, response: Response) -> tuple[dict, dic
         company = get_company(org_name=org)
         if company:
             ctx["company_display_name"] = company["display_name"]
-    brand = (
-        BRAND_OVERRIDES.get(ctx.get("org_id") or "")
-        or BRAND_OVERRIDES.get(ctx.get("org_name") or "")
-    )
+    brand = _resolve_brand(ctx)
     if brand:
         ctx["brand"] = brand
+    elif ctx.get("org_id") or ctx.get("org_name"):
+        # Emit a console hint so the operator can see exactly which
+        # keys to add to BRAND_OVERRIDES — much faster than digging
+        # through /profile.
+        print(
+            "[branding] no theme for "
+            f"org_id={ctx.get('org_id')!r} "
+            f"org_name={ctx.get('org_name')!r} "
+            f"display={ctx.get('company_display_name')!r}"
+        )
 
     # Per-user app-state isolation: Starlette's SessionMiddleware cookie
     # is independent of the SDK's session, so app state (conversation,
@@ -719,6 +758,65 @@ async def home(request: Request, response: Response):
     return templates.TemplateResponse(request=request, name="home.html")
 
 
+@app.post("/signin")
+async def signin(request: Request):
+    """Email-driven HRD entry point.
+
+    Looks the email up in Auth0 (Management API users-by-email),
+    enumerates the user's Auth0 Organizations, and routes:
+
+      - 0 orgs (or unknown email): standard /auth/login (universal
+        login + admin/Okta path).
+      - 1 org: /auth/login?organization=<id>&login_hint=<email>.
+      - 2+ orgs: render the org-picker page so the user can pick
+        which one to log into.
+
+    Email entry doesn't authenticate anything by itself — it just
+    pre-selects the Auth0 Organization context so the credentials
+    page is correctly scoped.
+    """
+    from urllib.parse import quote_plus, urlencode as _urlencode
+
+    form = await request.form()
+    email = (form.get("email") or "").strip().lower()
+    if not email:
+        return RedirectResponse(url="/?error=email+required", status_code=303)
+
+    user_record: dict | None = None
+    try:
+        user_record = await find_user_by_email(email)
+    except ManagementError:
+        user_record = None
+
+    orgs: list[dict] = []
+    if user_record and user_record.get("user_id"):
+        try:
+            orgs = await list_user_organizations(user_record["user_id"])
+        except ManagementError:
+            orgs = []
+
+    if not orgs:
+        # Unknown email or admin-style account with no org — fall
+        # through to the universal Auth0 login. login_hint pre-fills
+        # the email entry on the universal page if Auth0 supports it.
+        return RedirectResponse(
+            url=f"/auth/login?login_hint={quote_plus(email)}",
+            status_code=303,
+        )
+
+    if len(orgs) == 1:
+        params = _urlencode(
+            {"organization": orgs[0]["id"], "login_hint": email}
+        )
+        return RedirectResponse(url=f"/auth/login?{params}", status_code=303)
+
+    return templates.TemplateResponse(
+        request=request,
+        name="org_picker.html",
+        context={"email": email, "orgs": orgs},
+    )
+
+
 @app.get("/connect/google-calendar")
 async def connect_google_calendar(request: Request):
     from urllib.parse import urlencode
@@ -728,41 +826,6 @@ async def connect_google_calendar(request: Request):
         "connection_scope": " ".join(GOOGLE_CONNECTION_SCOPES),
     }
     return RedirectResponse(url=f"/auth/login?{urlencode(params)}")
-
-
-@app.get("/switch-org/{key}")
-async def switch_org(request: Request, key: str):
-    """Multi-org users hop between their Auth0 Organizations here.
-
-    `key` is either a literal `all` (turn on the aggregate view —
-    the user's data filters fan out across every org they belong to)
-    or an Auth0 organization id (e.g. `org_aGUH...`). The org id
-    path forces a fresh Auth0 login pinned to that org so the
-    access token's `org_id` / `org_name` claims are repointed.
-    """
-    user = await _get_user(request, Response())
-    if not user:
-        return RedirectResponse(url="/auth/login")
-
-    # Guard against switching into an org the user isn't a member of.
-    memberships = request.session.get("user_organizations") or []
-    member_ids = {o.get("id") for o in memberships if o.get("id")}
-
-    if key == "all":
-        if len(memberships) < 2:
-            return RedirectResponse(url="/dashboard")
-        request.session["aggregate_orgs"] = True
-        return RedirectResponse(url="/dashboard")
-
-    if key not in member_ids:
-        return RedirectResponse(url="/dashboard")
-
-    # Aggregate flag and chat conversation are scoped to whichever org
-    # context the user is in — clear them on a switch so the next org
-    # starts fresh.
-    request.session.pop("aggregate_orgs", None)
-    request.session["conversation"] = []
-    return RedirectResponse(url=f"/auth/login?organization={key}")
 
 
 @app.get("/dashboard")

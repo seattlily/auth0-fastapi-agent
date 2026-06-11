@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pick your organization · CompassZero</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <div class="landing">
+        <h1>Compass<span class="compass">Zero</span></h1>
+        <p style="margin-bottom: 1.75rem;">Hi <strong>{{ email }}</strong> — you're a member of {{ orgs|length }} organizations. Pick which one you'd like to sign in to.</p>
+
+        <div style="display: flex; flex-direction: column; gap: 0.75rem; max-width: 420px; margin: 0 auto;">
+            {% for o in orgs %}
+            <a href="/auth/login?organization={{ o.id }}&login_hint={{ email|urlencode }}" class="org-tile">
+                <div class="org-tile-name">{{ o.display_name or o.name }}</div>
+                <div class="org-tile-slug"><code>{{ o.name }}</code></div>
+                <span class="org-tile-arrow">→</span>
+            </a>
+            {% endfor %}
+        </div>
+
+        <p style="margin-top: 1.75rem; font-size: 0.88rem;">
+            <a href="/" style="color: var(--muted);">← Use a different email</a>
+        </p>
+    </div>
+</body>
+</html>
