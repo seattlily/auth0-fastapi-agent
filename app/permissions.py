@@ -1,4 +1,4 @@
-"""Permission helpers for CompassZero.
+"""Permission helpers for Compass0.
 
 The Auth0 API at audience `https://compasszero.api` has RBAC enabled
 with **Add Permissions in the Access Token** turned on, so the access

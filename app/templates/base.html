@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{% if ctx and ctx.company_display_name %}{{ ctx.company_display_name }} · {% endif %}{% block title %}CompassZero{% endblock %}</title>
+    <title>{% if ctx and ctx.company_display_name %}{{ ctx.company_display_name }} · {% endif %}{% block title %}Compass0{% endblock %}</title>
     <script>
         (function(){
             var s = localStorage.getItem('theme');
@@ -13,7 +13,7 @@
     </script>
     <link rel="stylesheet" href="/static/style.css?v={{ static_version }}">
     {% if ctx and ctx.brand %}
-    {# Minimal per-org theming — keep CompassZero's white surface and
+    {# Minimal per-org theming — keep Compass0's white surface and
        default button styling. We only add: a thin gradient accent bar
        at the very top of the page, a colored ring around the logo,
        and a colored underline on the active nav link. #}
@@ -50,9 +50,9 @@
                 <img src="{{ ctx.brand.logo_url }}" alt="" class="brand-logo">
                 {% endif %}
                 {% if ctx and ctx.company_display_name %}
-                {{ ctx.company_display_name }}<small style="margin-left:0.4rem; font-size:0.62rem; font-weight:600; color:var(--muted); letter-spacing:0.08em; text-transform:uppercase;">on CompassZero</small>
+                {{ ctx.company_display_name }}<small style="margin-left:0.4rem; font-size:0.62rem; font-weight:600; color:var(--muted); letter-spacing:0.08em; text-transform:uppercase;">on Compass0</small>
                 {% else %}
-                Compass<span class="compass">Zero</span>
+                Compass<span class="compass">0</span>
                 {% endif %}
             </a>
             <div class="nav-links">

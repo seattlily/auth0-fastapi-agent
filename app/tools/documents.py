@@ -1,4 +1,4 @@
-"""Document generation for the CompassZero demo.
+"""Document generation for the Compass0 demo.
 
 Pure-stdlib PDF writer — emits a one-page, Helvetica-only PDF 1.4 file
 without any external dependencies. Good enough for mock contracts and
@@ -138,14 +138,14 @@ def generate_contract_pdf(
         output_path = documents_dir() / f"contract-{org_name}.pdf"
 
     blocks: list[tuple[str, int, bool]] = [
-        ("CompassZero", 18, True),
+        ("Compass0", 18, True),
         ("Travel Management Services Agreement", 12, False),
         ("", 11, False),
         (f"Effective date: {_today()}", 10, False),
         ("", 10, False),
         ("Parties", 12, True),
         (
-            "This agreement is entered into between CompassZero, Inc. (\"CompassZero\") "
+            "This agreement is entered into between Compass0, Inc. (\"Compass0\") "
             f"and {display_name} (\"Client\"; Auth0 organization slug: {org_name}).",
             11,
             False,
@@ -153,7 +153,7 @@ def generate_contract_pdf(
         ("", 11, False),
         ("1. Scope of services", 12, True),
         (
-            "CompassZero will provide the Client with a managed travel-booking platform, "
+            "Compass0 will provide the Client with a managed travel-booking platform, "
             "including agent-assisted reservations, customer self-service, and itinerary "
             "management. Service availability targets a 99.9 percent monthly uptime.",
             11,
@@ -181,8 +181,8 @@ def generate_contract_pdf(
         ("4. Authorized users", 12, True),
         (
             "Client travel agents and customers will authenticate via Auth0 within the "
-            f"organization \"{org_name}\". CompassZero administrators will provision and "
-            "deprovision agents on Client's instruction. CompassZero may suspend any "
+            f"organization \"{org_name}\". Compass0 administrators will provision and "
+            "deprovision agents on Client's instruction. Compass0 may suspend any "
             "user account that violates the platform's acceptable-use policy.",
             11,
             False,
@@ -190,7 +190,7 @@ def generate_contract_pdf(
         ("", 11, False),
         ("5. Data protection", 12, True),
         (
-            "CompassZero processes booking, customer, and traveler data on Client's "
+            "Compass0 processes booking, customer, and traveler data on Client's "
             "behalf as a processor under the parties' Data Processing Addendum. "
             "Authentication tokens, MFA enrollments, and audit logs are retained per "
             "the security policy attached as Schedule B.",
@@ -200,7 +200,7 @@ def generate_contract_pdf(
         ("", 11, False),
         ("6. Signatures", 12, True),
         ("", 11, False),
-        ("CompassZero, Inc.", 11, True),
+        ("Compass0, Inc.", 11, True),
         ("By: ___________________________   Title: ___________________________", 10, False),
         ("Date: ___________________________", 10, False),
         ("", 11, False),
@@ -233,7 +233,7 @@ def generate_invoice_pdf(
     )
 
     blocks: list[tuple[str, int, bool]] = [
-        ("CompassZero", 18, True),
+        ("Compass0", 18, True),
         (f"Invoice {trip['id'].upper().replace('TR_', 'INV-')}", 12, False),
         ("", 11, False),
         (f"Issued: {_today()}", 10, False),
@@ -257,7 +257,7 @@ def generate_invoice_pdf(
         (f"Total due:                                {currency} {total:,.2f}", 12, True),
         ("", 11, False),
         (
-            "Questions? Reach your CompassZero travel agent or reply to this invoice. "
+            "Questions? Reach your Compass0 travel agent or reply to this invoice. "
             "All amounts are illustrative for the workshop demo.",
             10,
             False,

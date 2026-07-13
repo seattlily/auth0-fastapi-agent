@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% set active = 'connections' %}
-{% block title %}Connected Accounts — CompassZero{% endblock %}
+{% block title %}Connected Accounts — Compass0{% endblock %}
 
 {% macro provider_card(name, tagline, connection_id, description, accounts) %}
     {% set acc = (accounts | selectattr('connection', 'equalto', connection_id) | list | first) %}

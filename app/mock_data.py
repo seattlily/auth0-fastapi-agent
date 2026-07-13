@@ -1,4 +1,4 @@
-"""In-memory mock data for the CompassZero demo.
+"""In-memory mock data for the Compass0 demo.
 
 `org_name` is the join key between this data and the Auth0 token —
 match the `org_name` you set on each Auth0 Organization to a

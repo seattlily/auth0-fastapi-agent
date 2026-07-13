@@ -26,7 +26,7 @@
         {% if not messages %}
         <div class="message assistant">
             <strong>Assistant</strong>
-            <div class="content">{% if ctx.role == 'compass_admin' %}Hi! I can help you spin up new Auth0 organizations, add or remove travel agents, generate contracts, and list customers, trips, or organizations. (Travel agents — not admins — are the ones who add customers.) What would you like to do?{% elif ctx.role == 'travel_agent' %}Hi! I can find flights, browse experiences, book trips, add new customers to your organization, and pull details on existing bookings. Pending customer requests show up on your dashboard for one-click approval. What would you like to do?{% elif ctx.role == 'customer' %}Hi! I can search flights and experiences, list your trips, add a trip to your Google Calendar, and submit booking requests for your travel agent to approve. What would you like to do?{% else %}Hi! I'm the CompassZero assistant. Your role isn't fully provisioned yet — ask an admin to assign you a role to unlock my tools.{% endif %}</div>
+            <div class="content">{% if ctx.role == 'compass_admin' %}Hi! I can help you spin up new Auth0 organizations, add or remove travel agents, generate contracts, and list customers, trips, or organizations. (Travel agents — not admins — are the ones who add customers.) What would you like to do?{% elif ctx.role == 'travel_agent' %}Hi! I can find flights, browse experiences, book trips, add new customers to your organization, and pull details on existing bookings. Pending customer requests show up on your dashboard for one-click approval. What would you like to do?{% elif ctx.role == 'customer' %}Hi! I can search flights and experiences, list your trips, add a trip to your Google Calendar, and submit booking requests for your travel agent to approve. What would you like to do?{% else %}Hi! I'm the Compass0 assistant. Your role isn't fully provisioned yet — ask an admin to assign you a role to unlock my tools.{% endif %}</div>
         </div>
         {% endif %}
     </div>
@@ -38,7 +38,7 @@
             <button type="button" class="prompt-chip" data-prompt="Create a new organization called ">Create a new org</button>
             <button type="button" class="prompt-chip" data-prompt="Add a new travel agent ">Add a travel agent</button>
             <button type="button" class="prompt-chip" data-prompt="List all travel agents">List all agents</button>
-            <button type="button" class="prompt-chip" data-prompt="Generate a CompassZero contract for ">Generate a contract</button>
+            <button type="button" class="prompt-chip" data-prompt="Generate a Compass0 contract for ">Generate a contract</button>
             <button type="button" class="prompt-chip" data-prompt="List organizations with the most spend">Top spenders</button>
             <button type="button" class="prompt-chip" data-prompt="List all customers">List all customers</button>
         </div>

@@ -334,7 +334,7 @@ GOOGLE_CONNECTION_SCOPES = [
 
 load_dotenv(override=True)
 
-app = FastAPI(title="CompassZero")
+app = FastAPI(title="Compass0")
 
 app.add_middleware(
     SessionMiddleware,
@@ -477,7 +477,7 @@ def _ensure_seed_documents() -> None:
             )
         add_document(
             kind="contract",
-            title=f"CompassZero × {company['display_name']} services agreement",
+            title=f"Compass0 × {company['display_name']} services agreement",
             filename=out.name,
             org_name=company["org_name"],
             size_bytes=out.stat().st_size,
@@ -641,7 +641,7 @@ async def require_login(request: Request, response: Response) -> tuple[dict, dic
             )
 
     # Resolve the user's company so templates can show the company
-    # display_name as the primary brand instead of CompassZero.
+    # display_name as the primary brand instead of Compass0.
     org = ctx.get("org_name")
     if org:
         company = get_company(org_name=org)
@@ -693,7 +693,7 @@ def build_system_prompt(user: dict | None, ctx: dict) -> str:
     profile = {k: v for k, v in profile.items() if v not in (None, "", [], {})}
 
     return (
-        "You are the CompassZero AI assistant — CompassZero is a B2B travel "
+        "You are the Compass0 AI assistant — Compass0 is a B2B travel "
         "platform. Your tools are filtered to match the signed-in user's "
         "Auth0 permissions, so only call what's available to you. Use the "
         "user profile below to personalize answers and decide which tool to "

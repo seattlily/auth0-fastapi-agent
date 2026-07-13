@@ -1,4 +1,4 @@
-"""CompassZero chat tools — every tool is permission-gated.
+"""Compass0 chat tools — every tool is permission-gated.
 
 Each tool entry has:
 - `schema`: OpenAI function-tool schema (what the model sees)
@@ -425,7 +425,7 @@ async def create_company(args: dict, ctx: dict) -> str:
 
 async def create_auth0_organization(args: dict, ctx: dict) -> str:
     """Create a real Auth0 Organization via the Management API and mirror
-    it into the local CompassZero company list so the dashboard reflects it."""
+    it into the local Compass0 company list so the dashboard reflects it."""
     require(ctx, "manage:companies")
     from .auth0_management import ManagementError, create_organization
 
@@ -455,7 +455,7 @@ async def create_auth0_organization(args: dict, ctx: dict) -> str:
 
 async def delete_auth0_organization(args: dict, ctx: dict) -> str:
     """Delete an Auth0 Organization via the Management API and remove the
-    corresponding entry from the local CompassZero company list."""
+    corresponding entry from the local Compass0 company list."""
     require(ctx, "manage:companies")
     from .auth0_management import (
         ManagementError,
@@ -641,7 +641,7 @@ async def delete_travel_agent(args: dict, ctx: dict) -> str:
 
 
 async def generate_contract(args: dict, ctx: dict) -> str:
-    """Admin-only: generate a CompassZero ↔ org services contract PDF
+    """Admin-only: generate a Compass0 ↔ org services contract PDF
     and add it to the documents list. No CIBA — this is a low-risk
     document creation, not an Auth0 mutation."""
     require(ctx, "manage:companies")
@@ -670,7 +670,7 @@ async def generate_contract(args: dict, ctx: dict) -> str:
     )
     doc = add_document(
         kind="contract",
-        title=f"CompassZero × {company['display_name']} services agreement",
+        title=f"Compass0 × {company['display_name']} services agreement",
         filename=out.name,
         org_name=org_slug,
         size_bytes=out.stat().st_size,
@@ -814,7 +814,7 @@ TOOLS: dict[str, dict] = {
             "type": "function",
             "function": {
                 "name": "list_all_trips",
-                "description": "List bookings across all CompassZero organizations. Admin-only.",
+                "description": "List bookings across all Compass0 organizations. Admin-only.",
                 "parameters": {"type": "object", "properties": {}},
             },
         },
@@ -838,7 +838,7 @@ TOOLS: dict[str, dict] = {
             "type": "function",
             "function": {
                 "name": "list_all_customers",
-                "description": "List every customer across all CompassZero organizations. Admin-only.",
+                "description": "List every customer across all Compass0 organizations. Admin-only.",
                 "parameters": {"type": "object", "properties": {}},
             },
         },
@@ -850,7 +850,7 @@ TOOLS: dict[str, dict] = {
             "type": "function",
             "function": {
                 "name": "list_companies",
-                "description": "List every CompassZero organization with budget vs. spent. Admin-only.",
+                "description": "List every Compass0 organization with budget vs. spent. Admin-only.",
                 "parameters": {"type": "object", "properties": {}},
             },
         },
@@ -997,7 +997,7 @@ TOOLS: dict[str, dict] = {
             "type": "function",
             "function": {
                 "name": "create_company",
-                "description": "Add a local CompassZero organization record (mock data only — does NOT create the Auth0 organization). Admin-only. Prefer create_auth0_organization unless you specifically need a local-only entry.",
+                "description": "Add a local Compass0 organization record (mock data only — does NOT create the Auth0 organization). Admin-only. Prefer create_auth0_organization unless you specifically need a local-only entry.",
                 "parameters": {
                     "type": "object",
                     "properties": {
@@ -1020,7 +1020,7 @@ TOOLS: dict[str, dict] = {
                 "name": "create_auth0_organization",
                 "description": (
                     "Create a real Auth0 Organization via the Management API "
-                    "AND mirror it into the local CompassZero organization list. "
+                    "AND mirror it into the local Compass0 organization list. "
                     "Use this whenever an admin says 'create an organization', "
                     "'add a new customer org', 'spin up a tenant for "
                     "Acme', etc. Admin-only. Triggers a CIBA push to the "
@@ -1049,7 +1049,7 @@ TOOLS: dict[str, dict] = {
                 "name": "delete_auth0_organization",
                 "description": (
                     "Delete an Auth0 Organization via the Management API and "
-                    "remove the matching local CompassZero organization. Use when "
+                    "remove the matching local Compass0 organization. Use when "
                     "an admin says 'delete the org for Acme', 'remove the "
                     "organization X', etc. Admin-only. Triggers a CIBA "
                     "push to the admin's device — they must approve the "
@@ -1134,10 +1134,10 @@ TOOLS: dict[str, dict] = {
             "function": {
                 "name": "generate_contract",
                 "description": (
-                    "Generate a CompassZero ↔ organization services agreement "
+                    "Generate a Compass0 ↔ organization services agreement "
                     "PDF and store it in the documents list. Use whenever an "
                     "admin says 'generate a contract for X', 'draft a "
-                    "CompassZero contract for org Y', 'I just created an "
+                    "Compass0 contract for org Y', 'I just created an "
                     "organization, make the paperwork', etc. Admin-only. The "
                     "organization must already exist (create it first via "
                     "create_auth0_organization). Does NOT trigger CIBA — it's "

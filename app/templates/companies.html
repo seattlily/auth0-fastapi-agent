@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% set active = 'companies' %}
-{% block title %}Organizations — CompassZero{% endblock %}
+{% block title %}Organizations — Compass0{% endblock %}
 
 {% block content %}
 <div class="page-header">
@@ -30,7 +30,7 @@
 {% if can_manage %}
 <div class="card">
     <h3>Create new organization</h3>
-    <p class="muted" style="font-size: 0.92rem;">Calls the Auth0 Management API to create a real Organization, then mirrors it into the local CompassZero organization list.</p>
+    <p class="muted" style="font-size: 0.92rem;">Calls the Auth0 Management API to create a real Organization, then mirrors it into the local Compass0 organization list.</p>
     <form method="post" action="/companies" data-ciba="Create this Auth0 organization? You'll get a push on your enrolled device — open Auth0 Guardian to confirm." style="display: grid; grid-template-columns: 1fr 1fr 1fr auto; gap: 0.75rem; align-items: end;">
         <div>
             <label class="muted" style="font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.06em; font-weight: 600; display: block; margin-bottom: 0.3rem;">Org slug</label>

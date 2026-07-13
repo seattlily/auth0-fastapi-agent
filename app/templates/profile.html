@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% set active = 'profile' %}
-{% block title %}Profile — CompassZero{% endblock %}
+{% block title %}Profile — Compass0{% endblock %}
 
 {% block content %}
 <div class="page-header">
@@ -22,7 +22,7 @@
         {% for p in ctx.permissions|sort %}<code style="background:var(--surface-alt); padding:0.2rem 0.55rem; border-radius:var(--radius-pill); font-size:0.78rem;">{{ p }}</code>{% endfor %}
     </div>
     {% else %}
-    <p class="muted">No permissions on this token. Check that RBAC is enabled on the CompassZero API and that this user has a role assigned.</p>
+    <p class="muted">No permissions on this token. Check that RBAC is enabled on the Compass0 API and that this user has a role assigned.</p>
     {% endif %}
 </section>
 
