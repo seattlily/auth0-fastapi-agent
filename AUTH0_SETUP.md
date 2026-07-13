@@ -27,9 +27,14 @@ Open the new app's **Settings** tab. Scroll down to **Application URIs**.
   http://localhost:8000/auth/callback,
   http://127.0.0.1:8000/auth/callback,
   http://localhost:8000/connections/callback,
-  http://127.0.0.1:8000/connections/callback
+  http://127.0.0.1:8000/connections/callback,
+  http://localhost:8000/connections/ma-callback,
+  http://127.0.0.1:8000/connections/ma-callback
   ```
-  The `auth0-fastapi` SDK auto-registers the OAuth callback at **`/auth/callback`** (note the `/auth/` prefix). Both `localhost` and `127.0.0.1` are needed because the redirect URI sent to Auth0 is built from whichever host you visit the app at.
+  - `/auth/callback` — the `auth0-fastapi` SDK's OAuth callback (note the `/auth/` prefix).
+  - `/connections/callback` — where Auth0 redirects after a user authorizes a connected account (Google, GitHub, etc.). Passed as `redirect_uri` in the My Account API `initiate_connect` call; Auth0 will reject the call with `"Invalid redirect_uri"` if this is missing.
+  - `/connections/ma-callback` — where Auth0 redirects after the dedicated My Account API token flow (`/connections/authorize`). Required because the `/me/` audience token cannot be obtained by exchanging the app's main refresh token when `AUTH0_AUDIENCE` points to a different API (see §3 and §8.4).
+  - Both `localhost` and `127.0.0.1` are needed because the redirect URI sent to Auth0 is built from whichever host you visit the app at.
 
 - **Allowed Logout URLs**:
   ```
@@ -130,15 +135,13 @@ The Connected Accounts page (`/connections`) talks to Auth0's **My Account API**
 
 This avoids an extra Auth0-side consent screen during the Connected Accounts flow.
 
-### 3.4 Multi-Resource Refresh Token (MRRT)
+### 3.4 Multi-Resource Refresh Token (MRRT) — not required with the current code
 
-- Auth0 dashboard → **Applications → auth0-fastapi-agent → Settings**.
-- Scroll to **Multi-Resource Refresh Token** (it's a section, not a tab).
-- Toggle **Multi-Resource Refresh Token** **on**.
-- Make sure **Auth0 My Account API** is checked in the resource list.
-- Save Changes.
-
-> **Why this matters**: MRRT is what lets the same refresh token be exchanged for tokens scoped to multiple Auth0 audiences (your custom API *and* the My Account API). Without MRRT, the connected-accounts flow fails with `invalid_grant` or `invalid_scope`.
+> **Note**: the current codebase obtains the My Account API token via a dedicated OAuth code flow (`/connections/authorize` → Auth0 `/authorize?audience=.../me/` → `/connections/ma-callback`) rather than by exchanging the main app's refresh token. You do **not** need to enable MRRT for connected accounts to work.
+>
+> **Why the refresh-token exchange approach was abandoned**: when `AUTH0_AUDIENCE` is set to a custom API (e.g., `https://compasszero-api`), Auth0 audience-locks the refresh token at login. Attempting to exchange it for a `/me/` audience token causes Auth0 to silently return the original token (with the wrong `aud` and no `connected_accounts` scopes), which the My Account API then rejects with HTTP 401. The fix is the separate code flow described in §3 and implemented in `tools/auth0_my_account.py`.
+>
+> If you ever switch back to a refresh-token-exchange approach, you would need MRRT on and the My Account API checked in the resource list.
 
 ---
 
@@ -264,7 +267,7 @@ Before testing the app at runtime, walk this list. Most "it doesn't work" report
 
 | ✓ | Check |
 |---|---|
-| ☐ | App's Allowed Callback URLs include all 4 (`/auth/callback` and `/connections/callback`, on both `localhost` and `127.0.0.1`) |
+| ☐ | App's Allowed Callback URLs include all 6 (`/auth/callback`, `/connections/callback`, and `/connections/ma-callback`, on both `localhost` and `127.0.0.1`) |
 | ☐ | App's **Refresh Token Rotation** is **off** |
 | ☐ | App's **Token Vault** grant type is enabled (Advanced → Grant Types) |
 | ☐ | A custom Auth0 API exists with `RS256` and your application is authorized for it (User-Delegated Access) |
@@ -309,12 +312,13 @@ For each of these, the user must have logged in (so a session exists) and a refr
 - **App uses it for**: minting on-demand tokens for both the My Account API (Connected Accounts) and Token Vault (Google federated tokens).
 - **Stored at**: `request.session["refresh_token"]`.
 
-### 7.4 My Account API access token (minted on demand)
+### 7.4 My Account API access token (obtained via dedicated OAuth code flow)
 
-- **Issued by**: Auth0, via a `/oauth/token` call with `grant_type=refresh_token`, `audience=https://YOUR-TENANT.auth0.com/me/`, `scope=*:me:connected_accounts`.
-- **Format**: opaque to the app (used as a Bearer token only). The app never inspects it.
-- **App uses it for**: every call to `/me/v1/connected-accounts/*` — listing, creating, completing, and deleting connected accounts. Code lives in `tools/auth0_my_account.py`.
-- **Lifetime**: short-lived (a few minutes); minted fresh per request.
+- **Issued by**: Auth0, via a full OAuth authorization code flow with `audience=https://YOUR-TENANT.auth0.com/me/` and `scope=*:me:connected_accounts`.
+- **Flow**: user visits `/connections` → redirected to `/connections/authorize` → Auth0 `/authorize?audience=.../me/` → Auth0 redirects to `/connections/ma-callback` with a code → app exchanges code for the token (`tools/auth0_my_account.py:exchange_code_for_ma_token`).
+- **Why not a refresh token exchange**: when `AUTH0_AUDIENCE` points to a different API, Auth0 audience-locks the refresh token. Exchanging it for `audience=.../me/` silently returns the wrong token — correct `aud` is never set, `connected_accounts` scopes are dropped, and the My Account API returns HTTP 401. See §3.4.
+- **Stored at**: `request.session["ma_access_token"]` (Starlette's cookie session — **not** the Auth0 SDK session). All connections routes read it via `request.session.get("ma_access_token")`.
+- **App uses it for**: every call to `/me/v1/connected-accounts/*` — listing, initiating, completing, and deleting connected accounts. Code lives in `tools/auth0_my_account.py`.
 
 ### 7.5 Federated access token (Token Vault — minted on demand)
 
@@ -329,7 +333,11 @@ For each of these, the user must have logged in (so a session exists) and a refr
 
 | Error | Layer | Fix |
 |---|---|---|
-| Auth0 page "Be careful! redirect_uri is not associated with this application" | Auth0 (your RWA) | Allowed Callback URLs (§1.2) — must include all 4 URLs and you must have clicked Save Changes at the bottom. |
+| Auth0 page "Be careful! redirect_uri is not associated with this application" | Auth0 (your RWA) | Allowed Callback URLs (§1.2) — must include all 6 URLs (`/auth/callback`, `/connections/callback`, `/connections/ma-callback`, on both `localhost` and `127.0.0.1`) and you must have clicked Save Changes at the bottom. |
+| `"Invalid redirect_uri"` from My Account API `initiate_connect` (400) | Auth0 (your RWA) | `http://localhost:8000/connections/callback` is not in Allowed Callback URLs. Add it (§1.2). The My Account API validates the `redirect_uri` you pass to `/me/v1/connected-accounts/connect` against the same list. |
+| `Service not found: https://YOUR-TENANT.auth0.com/me/` on `/connections` | Auth0 tenant | My Account API is not activated. Go to Auth0 Dashboard → APIs — you'll see an "Activate My Account API" banner. Click it (§3.1). |
+| `ERR_TOO_MANY_REDIRECTS` on `/connections` page | App code | Can happen if the app reads `ma_access_token` from the wrong session store. The token is stored in Starlette's `request.session` (cookie), NOT in the Auth0 SDK session returned by `require_login()`. All connections routes must use `request.session.get("ma_access_token")`. |
+| HTTP 401 from My Account API despite token appearing valid | Auth0 (your RWA) | The My Account token was obtained by exchanging the main refresh token, but `AUTH0_AUDIENCE` is set to a different API — Auth0 audience-locks the refresh token and silently returns the wrong token. Use the dedicated `/connections/authorize` code flow instead (§7.4). |
 | Google's `redirect_uri_mismatch` error page | Google Cloud Console | Authorized redirect URIs on the OAuth client (§4.1) — add `https://YOUR-TENANT.auth0.com/login/callback`. |
 | GitHub "The redirect_uri MUST match the registered callback URL" | github.com/settings/developers | Authorization callback URL on the GitHub OAuth app (§5.1). |
 | `Grant type 'urn:auth0:params:...' not allowed for the client` (in Auth0 logs) | Auth0 (your RWA) | Token Vault grant (§1.6). |

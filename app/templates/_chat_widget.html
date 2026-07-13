@@ -13,6 +13,8 @@
 <script src="https://cdn.jsdelivr.net/npm/marked@13/marked.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/dompurify@3/dist/purify.min.js"></script>
 
+<div class="chat-layout{% if compact %} chat-layout-compact{% endif %}">
+
 <div class="chat {% if compact %}chat-compact{% endif %}">
     <div class="messages" id="messages">
         {% for msg in messages %}
@@ -33,24 +35,30 @@
         {% if ctx.role == 'compass_admin' %}
         <div class="prompt-chips" aria-label="Suggested prompts">
             <span class="prompt-chips-label">Try:</span>
-            <button type="button" class="prompt-chip" data-prompt="Create a new organization called ">Create a new organization</button>
-            <button type="button" class="prompt-chip" data-prompt="Add a new travel agent ">Add a new agent</button>
+            <button type="button" class="prompt-chip" data-prompt="Create a new organization called ">Create a new org</button>
+            <button type="button" class="prompt-chip" data-prompt="Add a new travel agent ">Add a travel agent</button>
+            <button type="button" class="prompt-chip" data-prompt="List all travel agents">List all agents</button>
             <button type="button" class="prompt-chip" data-prompt="Generate a CompassZero contract for ">Generate a contract</button>
-            <button type="button" class="prompt-chip" data-prompt="List organizations with the most spend">List organizations with most spend</button>
+            <button type="button" class="prompt-chip" data-prompt="List organizations with the most spend">Top spenders</button>
+            <button type="button" class="prompt-chip" data-prompt="List all customers">List all customers</button>
         </div>
         {% elif ctx.role == 'travel_agent' %}
         <div class="prompt-chips" aria-label="Suggested prompts">
             <span class="prompt-chips-label">Try:</span>
             <button type="button" class="prompt-chip" data-prompt="Book a flight ">Book a flight</button>
             <button type="button" class="prompt-chip" data-prompt="Book an experience ">Book an experience</button>
-            <button type="button" class="prompt-chip" data-prompt="Add a new customer named ">Add a new customer</button>
+            <button type="button" class="prompt-chip" data-prompt="Add a new customer named ">Add a customer</button>
+            <button type="button" class="prompt-chip" data-prompt="Show my pending approval requests">Pending approvals</button>
+            <button type="button" class="prompt-chip" data-prompt="List all my customers">List my customers</button>
         </div>
         {% elif ctx.role == 'customer' %}
         <div class="prompt-chips" aria-label="Suggested prompts">
             <span class="prompt-chips-label">Try:</span>
             <button type="button" class="prompt-chip" data-prompt="Search for flights ">Search for flights</button>
-            <button type="button" class="prompt-chip" data-prompt="Request a trip ">Request a trip</button>
+            <button type="button" class="prompt-chip" data-prompt="Request a trip to ">Request a trip</button>
             <button type="button" class="prompt-chip" data-prompt="List my trips">List my trips</button>
+            <button type="button" class="prompt-chip" data-prompt="Add my next trip to Google Calendar">Add trip to Calendar</button>
+            <button type="button" class="prompt-chip" data-prompt="Show my upcoming bookings">Upcoming bookings</button>
         </div>
         {% endif %}
     {% endif %}
@@ -60,6 +68,17 @@
         <button type="submit" class="btn">Send</button>
     </form>
 </div>
+
+<aside class="agent-log" id="agent-log-panel">
+    <div class="agent-log-header">
+        <span>Agent Activity</span>
+        <span class="agent-log-count" id="agent-log-count" style="display:none"></span>
+    </div>
+    <div class="agent-log-entries" id="agent-log-entries">
+        <div class="agent-log-empty" id="agent-log-empty">No tool calls yet</div>
+    </div>
+</aside>
+</div><!-- /.chat-layout -->
 
 <script>
 DOMPurify.addHook('afterSanitizeAttributes', (node) => {
@@ -83,13 +102,15 @@ document.querySelectorAll('.message.assistant .content').forEach((el) => {
     const input = document.getElementById('chat-input');
     const messages = document.getElementById('messages');
     const clearBtn = document.getElementById('clear-chat');
+    const logEntries = document.getElementById('agent-log-entries');
+    const logCount = document.getElementById('agent-log-count');
+    let totalToolCalls = 0;
 
     document.querySelectorAll('.prompt-chip').forEach((chip) => {
         chip.addEventListener('click', () => {
             const prefill = chip.dataset.prompt || chip.textContent.trim();
             input.value = prefill;
             input.focus();
-            // Move caret to end so the user can keep typing.
             const pos = input.value.length;
             input.setSelectionRange(pos, pos);
         });
@@ -133,6 +154,74 @@ document.querySelectorAll('.message.assistant .content').forEach((el) => {
         return contentEl;
     }
 
+    function shortVal(v) {
+        const s = typeof v === 'string' ? v : JSON.stringify(v);
+        return s.length > 40 ? s.slice(0, 40) + '…' : s;
+    }
+
+    function addLogEntry(id, name, args, ciba, reasoning) {
+        if (logEntries) {
+            const empty = document.getElementById('agent-log-empty');
+            if (empty) empty.remove();
+
+            totalToolCalls++;
+            if (logCount) {
+                logCount.textContent = totalToolCalls;
+                logCount.style.display = '';
+            }
+
+            const entry = document.createElement('div');
+            entry.className = 'agent-log-entry' + (reasoning ? ' agent-log-reasoning' : '');
+            entry.dataset.tcid = id;
+
+            const nameEl = document.createElement('div');
+            nameEl.className = 'agent-log-entry-name';
+            nameEl.textContent = reasoning ? '💭 Reasoning' : name;
+            entry.appendChild(nameEl);
+
+            if (reasoning) {
+                const text = (args && args.reasoning) ? args.reasoning : '';
+                if (text) {
+                    const reasonEl = document.createElement('div');
+                    reasonEl.className = 'agent-log-entry-args';
+                    reasonEl.textContent = text.length > 220 ? text.slice(0, 220) + '…' : text;
+                    entry.appendChild(reasonEl);
+                }
+            } else {
+                const pairs = Object.entries(args || {});
+                if (pairs.length) {
+                    const argsEl = document.createElement('div');
+                    argsEl.className = 'agent-log-entry-args';
+                    argsEl.textContent = pairs.map(([k, v]) => k + ': ' + shortVal(v)).join('  ·  ');
+                    entry.appendChild(argsEl);
+                }
+            }
+
+            const statusEl = document.createElement('div');
+            statusEl.className = 'agent-log-entry-status agent-log-pending';
+            statusEl.innerHTML = reasoning
+                ? '<span class="agent-log-spinner"></span> Planning…'
+                : (ciba
+                    ? '<span class="agent-log-spinner"></span> Waiting for push approval…'
+                    : '<span class="agent-log-spinner"></span> Running…');
+            entry.appendChild(statusEl);
+
+            logEntries.appendChild(entry);
+            entry.scrollIntoView({ block: 'nearest' });
+        }
+    }
+
+    function updateLogEntry(id, ok, ms, summary) {
+        if (!logEntries) return;
+        const entry = logEntries.querySelector('[data-tcid="' + id + '"]');
+        if (!entry) return;
+        const statusEl = entry.querySelector('.agent-log-entry-status');
+        statusEl.className = 'agent-log-entry-status ' + (ok ? 'agent-log-done' : 'agent-log-error');
+        let text = ok ? '✓ ' + ms + 'ms' : '✗ failed';
+        if (summary) text += ' — ' + summary;
+        statusEl.textContent = text;
+    }
+
     form.addEventListener('submit', async (e) => {
         e.preventDefault();
         const text = input.value.trim();
@@ -140,10 +229,15 @@ document.querySelectorAll('.message.assistant .content').forEach((el) => {
 
         input.value = '';
         input.disabled = true;
+
+        // Hide prompt chips on first message
+        const chips = document.querySelector('.prompt-chips');
+        if (chips) chips.style.display = 'none';
+
         addMessage('user', text, false);
         const assistantContent = addMessage('assistant', '', true);
 
-        let full = '';
+        let textContent = '';
         try {
             const resp = await fetch('/chat/stream', {
                 method: 'POST',
@@ -151,30 +245,50 @@ document.querySelectorAll('.message.assistant .content').forEach((el) => {
                 body: JSON.stringify({ message: text }),
             });
             if (!resp.ok || !resp.body) {
-                full = 'Error: ' + resp.status + ' ' + resp.statusText;
-                assistantContent.textContent = full;
+                textContent = 'Error: ' + resp.status + ' ' + resp.statusText;
+                assistantContent.textContent = textContent;
             } else {
                 const reader = resp.body.getReader();
                 const decoder = new TextDecoder();
+                let buf = '';
+
                 while (true) {
                     const { value, done } = await reader.read();
                     if (done) break;
-                    full += decoder.decode(value, { stream: true });
-                    assistantContent.innerHTML = renderMarkdown(full);
-                    messages.scrollTop = messages.scrollHeight;
+                    buf += decoder.decode(value, { stream: true });
+
+                    let boundary;
+                    while ((boundary = buf.indexOf('\n\n')) !== -1) {
+                        const block = buf.slice(0, boundary);
+                        buf = buf.slice(boundary + 2);
+                        const dataLine = block.split('\n').find(l => l.startsWith('data: '));
+                        if (!dataLine) continue;
+                        let msg;
+                        try { msg = JSON.parse(dataLine.slice(6)); } catch { continue; }
+
+                        if (msg.t === 'chunk') {
+                            textContent += msg.v;
+                            assistantContent.innerHTML = renderMarkdown(textContent);
+                            messages.scrollTop = messages.scrollHeight;
+                        } else if (msg.t === 'tool_call') {
+                            addLogEntry(msg.id, msg.name, msg.args, msg.ciba, msg.reasoning);
+                        } else if (msg.t === 'tool_result') {
+                            updateLogEntry(msg.id, msg.ok, msg.ms, msg.summary);
+                        }
+                    }
                 }
             }
         } catch (err) {
-            full = 'Error: ' + err.message;
-            assistantContent.textContent = full;
+            textContent = 'Error: ' + err.message;
+            assistantContent.textContent = textContent;
         }
 
-        if (full) {
+        if (textContent) {
             try {
                 await fetch('/chat/save', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ user: text, assistant: full }),
+                    body: JSON.stringify({ user: text, assistant: textContent }),
                 });
             } catch (err) { console.error('save failed', err); }
         }

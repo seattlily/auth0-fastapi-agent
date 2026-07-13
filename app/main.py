@@ -63,12 +63,13 @@ from tools.auth0_management import (
     sync_status,
 )
 from tools.auth0_my_account import (
+    CONNECTED_ACCOUNTS_SCOPES,
     MyAccountError,
     complete_connect,
     delete_account,
+    exchange_code_for_ma_token,
     initiate_connect,
     list_accounts,
-    mint_my_account_token,
 )
 from tools.compasszero import TOOLS as CZ_TOOLS
 from tools.compasszero import dispatch as cz_dispatch
@@ -87,7 +88,31 @@ from tools.google_calendar import (
 )
 from tools.google_gmail import GMAIL_LIST_TOOL_SCHEMA, list_recent_emails
 
-MAX_TOOL_ITERATIONS = 4
+MAX_TOOL_ITERATIONS = 12
+
+THINK_TOOL_SCHEMA = {
+    "type": "function",
+    "function": {
+        "name": "think",
+        "description": (
+            "Use this tool to reason through complex, multi-step tasks before acting. "
+            "Write your plan: what the user wants, what information you need and which "
+            "tools provide it, the order of calls, and any dependencies between steps. "
+            "This takes no real action — it's a reasoning scratchpad. After unexpected "
+            "tool results, call think again to re-plan. Skip it for simple single-tool requests."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "reasoning": {
+                    "type": "string",
+                    "description": "Your step-by-step plan for the task."
+                }
+            },
+            "required": ["reasoning"],
+        },
+    },
+}
 
 # Chat tools that block on a CIBA step-up. The chat stream surfaces
 # a "approve on your device" notice before dispatch so the user
@@ -702,6 +727,14 @@ def build_system_prompt(user: dict | None, ctx: dict) -> str:
         "request_*, tell the customer their agent will review the request. "
         "Travel agents review and approve / deny pending requests on their "
         "dashboard, not via chat tools.\n\n"
+        "Multi-step reasoning: For any task that requires 3+ steps, "
+        "multiple IDs to resolve, or sequential dependencies between tool "
+        "calls, first call `think` to plan your approach before acting. "
+        "In think, write: (1) what the user wants, (2) what information "
+        "you need and which tools provide it, (3) the exact sequence of "
+        "calls, and (4) what to check after each step. After unexpected "
+        "results, call think again to adjust. For simple single-tool "
+        "requests, skip think and act directly.\n\n"
         f"User profile:\n{json.dumps(profile, indent=2, default=str)}"
     )
 
@@ -1331,6 +1364,8 @@ async def chat_page(request: Request, response: Response):
 
 
 async def dispatch_any_tool(name: str, args: dict, ctx: dict, refresh_token: str) -> str:
+    if name == "think":
+        return json.dumps({"ok": True})
     if name in CZ_TOOLS:
         return await cz_dispatch(name, args, ctx)
     if name in GOOGLE_TOOLS_BY_NAME:
@@ -1366,7 +1401,7 @@ async def chat_stream(request: Request, response: Response):
     access_token, refresh_token = _tokens_from_session(session)
     conversation = request.session.get("conversation", [])
 
-    tool_schemas = cz_visible_schemas(ctx) + visible_google_schemas(ctx)
+    tool_schemas = [THINK_TOOL_SCHEMA] + cz_visible_schemas(ctx) + visible_google_schemas(ctx)
 
     messages = (
         [{"role": "system", "content": build_system_prompt(user, ctx)}]
@@ -1391,7 +1426,7 @@ async def chat_stream(request: Request, response: Response):
                     delta = chunk.choices[0].delta
                     if getattr(delta, "content", None):
                         content_acc += delta.content
-                        yield delta.content
+                        yield "data: " + json.dumps({"t": "chunk", "v": delta.content}) + "\n\n"
                     for tc in getattr(delta, "tool_calls", None) or []:
                         slot = tool_calls_acc.setdefault(
                             tc.index, {"id": "", "name": "", "arguments": ""}
@@ -1429,34 +1464,14 @@ async def chat_stream(request: Request, response: Response):
                     except json.JSONDecodeError:
                         args = {}
 
-                    badge = _tool_status_badge(name)
-                    status_lines = [f"\n\n_⏺ Calling **{name}**_{badge}"]
-                    if args:
-                        for k, v in args.items():
-                            status_lines.append(
-                                f"_  • `{k}` = {_short_arg(v)}_"
-                            )
-                    else:
-                        status_lines.append("_  • (no arguments)_")
-                    required = (
-                        CZ_TOOLS.get(name, {}).get("required_scopes")
-                        if name in CZ_TOOLS
-                        else None
-                    )
-                    if required:
-                        status_lines.append(
-                            "_  • required scope"
-                            f"{'s' if len(required) > 1 else ''}: "
-                            + ", ".join(f"`{s}`" for s in required)
-                            + "_"
-                        )
-                    if name in CIBA_GATED_CHAT_TOOLS:
-                        status_lines.append(
-                            "_  📲 Push notification sent — approve in the "
-                            "Auth0 Guardian app on your phone (waiting up "
-                            "to 3 minutes)..._"
-                        )
-                    yield "\n".join(status_lines) + "\n"
+                    yield "data: " + json.dumps({
+                        "t": "tool_call",
+                        "id": tc["id"],
+                        "name": name,
+                        "args": args,
+                        "ciba": name in CIBA_GATED_CHAT_TOOLS,
+                        "reasoning": name == "think",
+                    }) + "\n\n"
 
                     start_t = time.monotonic()
                     result = await dispatch_any_tool(name, args, ctx, refresh_token)
@@ -1469,23 +1484,29 @@ async def chat_stream(request: Request, response: Response):
                     except Exception:
                         pass
                     summary = _summarize_tool_result(name, result)
-                    status_icon = "✗ failed" if is_error else "✓ done"
-                    final_line = f"_  {status_icon} in {elapsed_ms} ms"
-                    if summary:
-                        final_line += f" — {summary}"
-                    final_line += "_\n\n"
-                    yield final_line
+                    yield "data: " + json.dumps({
+                        "t": "tool_result",
+                        "id": tc["id"],
+                        "name": name,
+                        "ok": not is_error,
+                        "ms": elapsed_ms,
+                        "summary": summary or "",
+                    }) + "\n\n"
 
                     messages.append(
                         {"role": "tool", "tool_call_id": tc["id"], "content": result}
                     )
 
-            yield "\n\n[Stopped: tool-call loop hit iteration limit.]"
+            yield "data: " + json.dumps({"t": "chunk", "v": "\n\n[Stopped: tool-call loop hit iteration limit.]"}) + "\n\n"
         except Exception as e:
             print(f"OpenAI API error: {type(e).__name__}: {e}")
-            yield f"\n\nError: {type(e).__name__}: {e}"
+            yield "data: " + json.dumps({"t": "chunk", "v": f"\n\nError: {type(e).__name__}: {e}"}) + "\n\n"
 
-    return StreamingResponse(generate(), media_type="text/plain")
+    return StreamingResponse(
+        generate(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 @app.post("/chat/save")
@@ -1552,6 +1573,70 @@ async def mfa_enroll(request: Request, response: Response):
 
 
 # ---------- connections (My Account API) ----------
+#
+# Getting a valid My Account API token requires a dedicated OAuth flow with
+# audience=https://{domain}/me/ — exchanging the main app's refresh token
+# doesn't work when AUTH0_AUDIENCE is set to a different API. Auth0
+# audience-locks the refresh token at login; the exchange silently returns
+# the original token (wrong aud, no connected_accounts scopes) and the
+# My Account API rejects it with HTTP 401. See AUTH0_SETUP.md §3 and §7.4.
+#
+# Flow:
+#   1. /connections/authorize  → Auth0 /authorize?audience=.../me/&prompt=consent
+#   2. /connections/ma-callback → exchange code, store token in Starlette session
+#   3. All connections routes read request.session["ma_access_token"] directly.
+#
+# Session store note: ma_access_token lives in Starlette's request.session
+# (cookie-based), NOT in the Auth0 SDK session returned by require_login().
+# Always use request.session.get("ma_access_token") here, never session.get(...).
+
+
+@app.get("/connections/authorize")
+async def connections_authorize(request: Request, response: Response):
+    user = await _get_user(request, response)
+    if not user:
+        return RedirectResponse(url="/auth/login")
+    state = secrets.token_urlsafe(24)
+    request.session["ma_oauth_state"] = state
+    from urllib.parse import urlencode
+    params = urlencode({
+        "response_type": "code",
+        "client_id": os.environ["AUTH0_CLIENT_ID"],
+        "redirect_uri": str(request.url_for("connections_ma_callback")),
+        "audience": f"https://{os.environ['AUTH0_DOMAIN']}/me/",
+        "scope": CONNECTED_ACCOUNTS_SCOPES,
+        "state": state,
+        "prompt": "consent",
+    })
+    return RedirectResponse(
+        url=f"https://{os.environ['AUTH0_DOMAIN']}/authorize?{params}"
+    )
+
+
+@app.get("/connections/ma-callback", name="connections_ma_callback")
+async def connections_ma_callback(request: Request, response: Response):
+    from urllib.parse import quote_plus
+    # Auth0 error response (e.g. access_denied, Service not found)
+    auth_error = request.query_params.get("error")
+    if auth_error:
+        request.session.pop("ma_oauth_state", None)
+        desc = request.query_params.get("error_description", auth_error)
+        return RedirectResponse(url=f"/connections?error={quote_plus(desc)}", status_code=303)
+
+    code = request.query_params.get("code")
+    state = request.query_params.get("state")
+    stored_state = request.session.pop("ma_oauth_state", None)
+    if not code or state != stored_state:
+        return RedirectResponse(url="/connections?error=oauth+state+mismatch", status_code=303)
+    try:
+        token = await exchange_code_for_ma_token(
+            code=code,
+            redirect_uri=str(request.url_for("connections_ma_callback")),
+        )
+    except MyAccountError as e:
+        return RedirectResponse(url=f"/connections?error={quote_plus(str(e))}", status_code=303)
+    request.session["ma_access_token"] = token
+    return RedirectResponse(url="/connections", status_code=303)
 
 
 @app.get("/connections")
@@ -1559,14 +1644,22 @@ async def connections_page(request: Request, response: Response):
     user, session, ctx = await require_login(request, response)
     if not user:
         return RedirectResponse(url="/auth/login")
+
+    ma_token = request.session.get("ma_access_token", "")
+    # Only redirect to authorize if there's no token AND no error to display
+    if not ma_token and not request.query_params.get("error"):
+        return RedirectResponse(url="/connections/authorize", status_code=303)
+
     accounts: list[dict] = []
     error: str | None = None
-    _, refresh_token = _tokens_from_session(session)
     try:
-        token = await mint_my_account_token(refresh_token)
-        accounts = await list_accounts(token)
+        accounts = await list_accounts(ma_token)
     except MyAccountError as e:
-        error = str(e)
+        err_str = str(e)
+        if "(401)" in err_str:
+            request.session.pop("ma_access_token", None)
+            return RedirectResponse(url="/connections/authorize", status_code=303)
+        error = err_str
     return templates.TemplateResponse(
         request=request,
         name="connections.html",
@@ -1585,7 +1678,10 @@ async def connections_connect(request: Request, response: Response, connection: 
     user, session, ctx = await require_login(request, response)
     if not user:
         return RedirectResponse(url="/auth/login")
-    _, refresh_token = _tokens_from_session(session)
+
+    ma_token = request.session.get("ma_access_token", "")
+    if not ma_token:
+        return RedirectResponse(url="/connections/authorize", status_code=303)
 
     redirect_uri = str(request.url_for("connections_callback"))
     state = secrets.token_urlsafe(24)
@@ -1595,18 +1691,16 @@ async def connections_connect(request: Request, response: Response, connection: 
     }
     scopes = scopes_for_connection.get(connection)
 
+    from urllib.parse import quote_plus
     try:
-        token = await mint_my_account_token(refresh_token)
         result = await initiate_connect(
-            my_account_token=token,
+            my_account_token=ma_token,
             connection=connection,
             redirect_uri=redirect_uri,
             state=state,
             scopes=scopes,
         )
     except MyAccountError as e:
-        from urllib.parse import quote_plus
-
         return RedirectResponse(
             url=f"/connections?error={quote_plus(str(e))}", status_code=303
         )
@@ -1644,12 +1738,12 @@ async def connections_complete(request: Request, response: Response):
         return JSONResponse({"error": "no pending connect in session"}, status_code=400)
     if state and pending.get("state") and state != pending["state"]:
         return JSONResponse({"error": "state mismatch"}, status_code=400)
-    session = await _get_session(request, response) or {}
-    _, refresh_token = _tokens_from_session(session)
+    ma_token = request.session.get("ma_access_token", "")
+    if not ma_token:
+        return JSONResponse({"error": "My Account session expired; visit /connections to re-authorize"}, status_code=401)
     try:
-        token = await mint_my_account_token(refresh_token)
         await complete_connect(
-            my_account_token=token,
+            my_account_token=ma_token,
             auth_session=pending["auth_session"],
             connect_code=connect_code,
             redirect_uri=pending["redirect_uri"],
@@ -1668,14 +1762,13 @@ async def connections_disconnect(
     user = await _get_user(request, response)
     if not user:
         return RedirectResponse(url="/auth/login")
-    session = await _get_session(request, response) or {}
-    _, refresh_token = _tokens_from_session(session)
+    ma_token = request.session.get("ma_access_token", "")
+    if not ma_token:
+        return RedirectResponse(url="/connections/authorize", status_code=303)
+    from urllib.parse import quote_plus
     try:
-        token = await mint_my_account_token(refresh_token)
-        await delete_account(token, account_id)
+        await delete_account(ma_token, account_id)
     except MyAccountError as e:
-        from urllib.parse import quote_plus
-
         return RedirectResponse(
             url=f"/connections?error={quote_plus(str(e))}", status_code=303
         )

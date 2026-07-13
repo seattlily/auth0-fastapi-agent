@@ -4,6 +4,13 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{% if ctx and ctx.company_display_name %}{{ ctx.company_display_name }} · {% endif %}{% block title %}CompassZero{% endblock %}</title>
+    <script>
+        (function(){
+            var s = localStorage.getItem('theme');
+            var p = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+            if ((s || p) === 'dark') document.documentElement.setAttribute('data-theme', 'dark');
+        })();
+    </script>
     <link rel="stylesheet" href="/static/style.css?v={{ static_version }}">
     {% if ctx and ctx.brand %}
     {# Minimal per-org theming — keep CompassZero's white surface and
@@ -78,6 +85,9 @@
                 <span>{{ user.name or user.email }}</span>
                 <span class="role-badge {{ ctx.role }}">{{ ctx.role|replace('_',' ') }}</span>
             </div>
+            <button class="theme-toggle" id="theme-toggle" onclick="toggleTheme()" aria-label="Toggle dark mode">
+                <span id="theme-icon">🌙</span>
+            </button>
         </div>
     </nav>
     {% endif %}
@@ -127,5 +137,23 @@
     </script>
 
     {% block scripts %}{% endblock %}
+    <script>
+        function toggleTheme() {
+            var isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+            if (isDark) {
+                document.documentElement.removeAttribute('data-theme');
+                localStorage.setItem('theme', 'light');
+            } else {
+                document.documentElement.setAttribute('data-theme', 'dark');
+                localStorage.setItem('theme', 'dark');
+            }
+            var icon = document.getElementById('theme-icon');
+            if (icon) icon.textContent = isDark ? '🌙' : '☀️';
+        }
+        (function(){
+            var icon = document.getElementById('theme-icon');
+            if (icon && document.documentElement.getAttribute('data-theme') === 'dark') icon.textContent = '☀️';
+        })();
+    </script>
 </body>
 </html>

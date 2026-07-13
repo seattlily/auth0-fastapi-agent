@@ -1,22 +1,25 @@
 /* CompassZero — Airbnb-inspired design system */
 
+/* ── Vintage palette — light mode ─────────────────────────────────── */
 :root {
-    --bg: #ffffff;
-    --surface: #ffffff;
-    --surface-alt: #f7f7f7;
-    --text: #222222;
-    --muted: #717171;
-    --brand: #635DFF;
-    --brand-dark: #4B44E0;
-    --brand-soft: #EEEEFE;
-    --accent: #008489;
-    --border: #DDDDDD;
-    --border-soft: #EBEBEB;
-    --shadow-sm: 0 1px 2px rgba(0,0,0,0.06);
-    --shadow-md: 0 6px 16px rgba(0,0,0,0.08);
-    --shadow-lg: 0 12px 28px rgba(0,0,0,0.10);
-    --user-msg-bg: #f7f7f7;
-    --assistant-msg-bg: #EEEEFE;
+    --bg: #FAFAF6;
+    --surface: #FFFFFF;
+    --surface-alt: #F5F1E6;
+    --text: #1A2620;
+    --muted: #6A7870;
+    --brand: #1D4E48;
+    --brand-dark: #154039;
+    --brand-soft: #E3EFEE;
+    --secondary: #7BAAA0;
+    --secondary-soft: #EAF2F0;
+    --accent: #C4A030;
+    --border: #D4CEB8;
+    --border-soft: #EAE7D8;
+    --shadow-sm: 0 1px 2px rgba(26,38,32,0.06);
+    --shadow-md: 0 6px 16px rgba(26,38,32,0.08);
+    --shadow-lg: 0 12px 28px rgba(26,38,32,0.10);
+    --user-msg-bg: #F5F1E6;
+    --assistant-msg-bg: #E3EFEE;
     --radius-sm: 8px;
     --radius: 12px;
     --radius-lg: 16px;
@@ -24,7 +27,46 @@
     --max-width: 1200px;
     --font: "Circular", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
     --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
 }
+
+/* ── Retro-inspired dark mode ──────────────────────────────────────── */
+[data-theme="dark"] {
+    --bg: #1A1720;
+    --surface: #21202E;
+    --surface-alt: #2A2840;
+    --text: #E8E4D8;
+    --muted: #9A9580;
+    --brand: #7BAAA0;
+    --brand-dark: #68938A;
+    --brand-soft: #1D302C;
+    --secondary: #6A9890;
+    --secondary-soft: #1D302C;
+    --accent: #C07E28;
+    --border: #3A3552;
+    --border-soft: #2E2B44;
+    --shadow-sm: 0 1px 2px rgba(0,0,0,0.25);
+    --shadow-md: 0 6px 16px rgba(0,0,0,0.35);
+    --shadow-lg: 0 12px 28px rgba(0,0,0,0.45);
+    --user-msg-bg: #2A2840;
+    --assistant-msg-bg: #1D302C;
+}
+
+/* ── Dark mode overrides for hard-coded colors ─────────────────────── */
+[data-theme="dark"] .status-badge.booked    { background: #1A2E4A; color: #88B4E8; }
+[data-theme="dark"] .status-badge.completed { background: #1A3028; color: #5DB882; }
+[data-theme="dark"] .status-badge.cancelled { background: #3A1A1E; color: #E88080; }
+[data-theme="dark"] .status-badge.pending   { background: #3A2C1A; color: #D4A855; }
+[data-theme="dark"] .alert-success { background: #1A3028; border-color: #2A5038; color: #5DB882; }
+[data-theme="dark"] .alert-error   { background: #3A1A1E; border-color: #5A2828; color: #E88080; }
+[data-theme="dark"] .alert-info    { background: var(--brand-soft); border-color: var(--brand); color: var(--brand); }
+[data-theme="dark"] .btn-danger:hover { background: #3A1A1E; color: #E88080; border-color: #E88080; }
+[data-theme="dark"] .bar-fill.over    { background: #E88080; }
+[data-theme="dark"] .bar-fill.warning { background: #C4A030; }
+[data-theme="dark"] .agent-log-done  { color: #5DB882; }
+[data-theme="dark"] .agent-log-error { color: #E88080; }
+[data-theme="dark"] .tab-btn .kind-pill.jwe { background: #3A2C1A; color: #D4A855; }
+[data-theme="dark"] .provider-status.connected { background: #1A3028; color: #5DB882; }
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -468,6 +510,158 @@ table tbody tr:hover { background: var(--surface-alt); }
     line-height: 1.2;
 }
 .prompt-chip:hover { background: var(--brand-soft); border-color: var(--brand); color: var(--brand-dark); }
+
+/* ---------- chat two-column layout ---------- */
+
+.chat-layout {
+    display: grid;
+    grid-template-columns: 1fr 280px;
+    gap: 1.5rem;
+    align-items: start;
+}
+
+/* Compact variant: single column, log below chat (used on dashboard) */
+.chat-layout-compact {
+    grid-template-columns: 1fr;
+}
+.chat-layout-compact .agent-log {
+    position: static;
+    max-height: 180px;
+    order: 1;
+}
+
+/* ── Dark mode toggle ──────────────────────────────────────────────── */
+.theme-toggle {
+    background: none;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-pill);
+    color: var(--text);
+    cursor: pointer;
+    padding: 0.32rem 0.7rem;
+    font-size: 0.82rem;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    transition: background 0.15s, border-color 0.15s;
+    line-height: 1;
+}
+.theme-toggle:hover {
+    background: var(--surface-alt);
+    border-color: var(--brand);
+}
+
+/* ---------- agent activity log ---------- */
+
+.agent-log {
+    background: var(--surface);
+    border: 1px solid var(--border-soft);
+    border-radius: var(--radius-lg);
+    overflow: hidden;
+    position: sticky;
+    top: 80px;
+    max-height: calc(100vh - 120px);
+    display: flex;
+    flex-direction: column;
+}
+.agent-log-header {
+    padding: 0.75rem 1rem;
+    border-bottom: 1px solid var(--border-soft);
+    font-size: 0.72rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--muted);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+.agent-log-count {
+    background: var(--brand-soft);
+    color: var(--brand-dark);
+    border-radius: var(--radius-pill);
+    padding: 0.1rem 0.55rem;
+    font-size: 0.7rem;
+    font-weight: 700;
+}
+.agent-log-entries {
+    flex: 1;
+    overflow-y: auto;
+    padding: 0.6rem;
+}
+.agent-log-empty {
+    color: var(--muted);
+    font-size: 0.82rem;
+    text-align: center;
+    padding: 2rem 0.75rem;
+    line-height: 1.4;
+}
+.agent-log-entry {
+    background: var(--surface-alt);
+    border: 1px solid var(--border-soft);
+    border-radius: var(--radius);
+    padding: 0.6rem 0.75rem;
+    margin-bottom: 0.45rem;
+}
+.agent-log-entry-name {
+    font-family: var(--mono);
+    font-size: 0.78rem;
+    font-weight: 600;
+    color: var(--text);
+}
+.agent-log-entry-args {
+    font-family: var(--mono);
+    font-size: 0.72rem;
+    color: var(--muted);
+    margin-top: 0.2rem;
+    word-break: break-all;
+    line-height: 1.4;
+}
+.agent-log-entry-status {
+    margin-top: 0.35rem;
+    font-size: 0.75rem;
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
+}
+.agent-log-pending { color: var(--muted); }
+.agent-log-done    { color: #0E6B33; }
+.agent-log-error   { color: #B00020; }
+.agent-log-reasoning {
+    border-left: 3px solid var(--secondary, #6c757d);
+    opacity: 0.82;
+}
+.agent-log-reasoning .agent-log-entry-name {
+    font-family: var(--sans, inherit);
+    color: var(--muted);
+    font-style: italic;
+    font-weight: 500;
+}
+.agent-log-reasoning .agent-log-entry-args {
+    font-family: var(--sans, inherit);
+    font-size: 0.74rem;
+    line-height: 1.5;
+}
+.agent-log-spinner {
+    display: inline-block;
+    width: 9px;
+    height: 9px;
+    border: 1.5px solid var(--border);
+    border-top-color: var(--brand);
+    border-radius: 50%;
+    animation: ciba-spin 0.75s linear infinite;
+    flex-shrink: 0;
+}
+
+@media (max-width: 960px) {
+    .chat-layout {
+        grid-template-columns: 1fr;
+    }
+    .agent-log {
+        position: static;
+        max-height: 220px;
+        order: 1;
+    }
+}
 
 .chat-form { display: flex; gap: 0.6rem; }
 .chat-form input {

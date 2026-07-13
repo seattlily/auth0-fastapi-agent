@@ -1,7 +1,34 @@
+# Auth0 My Account API — Connected Accounts
+#
+# Audience: https://{AUTH0_DOMAIN}/me/
+#
+# IMPORTANT — why a separate OAuth code flow is required:
+# When AUTH0_AUDIENCE is set to a custom API (e.g. https://compasszero-api),
+# Auth0 audience-locks the app's refresh token at login. Exchanging that
+# refresh token for audience=.../me/ silently returns the original token:
+# aud stays on the custom API, connected_accounts scopes are dropped, and
+# the My Account API responds with HTTP 401 "Invalid Token".
+#
+# The fix is a dedicated code flow in main.py:
+#   GET /connections/authorize  →  Auth0 /authorize?audience=.../me/
+#   GET /connections/ma-callback → exchange_code_for_ma_token() here
+#   token stored in request.session["ma_access_token"] (Starlette cookie session)
+#
+# Required Auth0 dashboard config (see AUTH0_SETUP.md §3):
+#   - My Account API activated (APIs → "Activate My Account API" banner)
+#   - App authorized with create/read/delete:me:connected_accounts scopes
+#   - http://localhost:8000/connections/ma-callback in Allowed Callback URLs
+#   - http://localhost:8000/connections/callback in Allowed Callback URLs
+
+import base64
+import json
+import logging
 import os
 from typing import Any
 
 import httpx
+
+logger = logging.getLogger(__name__)
 
 CONNECTED_ACCOUNTS_SCOPES = (
     "openid profile offline_access "
@@ -32,10 +59,36 @@ def _raise_for_status(resp: httpx.Response, action: str) -> None:
         return
     try:
         data = resp.json()
-        detail = data.get("error_description") or data.get("message") or data.get("error") or resp.text
+        detail = (
+            data.get("error_description")
+            or data.get("message")
+            or data.get("detail")
+            or data.get("error")
+            or resp.text
+        )
     except Exception:
         detail = resp.text
+    logger.error("My Account API %s failed (%s): %s", action, resp.status_code, resp.text)
     raise MyAccountError(f"My Account API {action} failed ({resp.status_code}): {detail}")
+
+
+async def exchange_code_for_ma_token(code: str, redirect_uri: str) -> str:
+    """Exchange an authorization code (from a /me-audience auth flow) for a My Account token."""
+    body = {
+        "grant_type": "authorization_code",
+        "client_id": os.environ["AUTH0_CLIENT_ID"],
+        "client_secret": os.environ["AUTH0_CLIENT_SECRET"],
+        "code": code,
+        "redirect_uri": redirect_uri,
+    }
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        resp = await client.post(
+            f"https://{_domain()}/oauth/token",
+            data=body,
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+        )
+    _raise_for_status(resp, "MA code exchange")
+    return resp.json()["access_token"]
 
 
 async def mint_my_account_token(refresh_token: str) -> str:
@@ -58,7 +111,19 @@ async def mint_my_account_token(refresh_token: str) -> str:
             headers={"Content-Type": "application/x-www-form-urlencoded"},
         )
     _raise_for_status(resp, "token exchange")
-    return resp.json()["access_token"]
+    token = resp.json()["access_token"]
+    try:
+        payload_b64 = token.split(".")[1]
+        payload_b64 += "=" * (-len(payload_b64) % 4)
+        claims = json.loads(base64.urlsafe_b64decode(payload_b64))
+        logger.warning(
+            "My Account token — aud=%r  scope=%r",
+            claims.get("aud"),
+            claims.get("scope"),
+        )
+    except Exception as _e:
+        logger.warning("Could not decode My Account token: %s", _e)
+    return token
 
 
 async def initiate_connect(
@@ -85,7 +150,9 @@ async def initiate_connect(
             },
         )
     _raise_for_status(resp, "connect (initiate)")
-    return resp.json()
+    data = resp.json()
+    logger.warning("initiate_connect response: %s", data)
+    return data
 
 
 async def complete_connect(
