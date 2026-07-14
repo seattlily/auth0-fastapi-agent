@@ -49,6 +49,8 @@
             {% if 'book:trips' in perms %}<button type="button" class="prompt-chip" data-prompt="Book a flight ">Book a flight</button>{% endif %}
             {% if 'book:experiences' in perms %}<button type="button" class="prompt-chip" data-prompt="Book an experience ">Book an experience</button>{% endif %}
             {% if 'book:trips' in perms %}<button type="button" class="prompt-chip" data-prompt="Add a new customer named ">Add a customer</button>{% endif %}
+            {% if 'book:trips' in perms %}<button type="button" class="prompt-chip" data-prompt="Cancel trip ">Cancel a trip</button>{% endif %}
+            {% if 'book:experiences' in perms %}<button type="button" class="prompt-chip" data-prompt="Cancel experience ">Cancel an experience</button>{% endif %}
             {% if 'book:trips' in perms %}<button type="button" class="prompt-chip" data-prompt="Delete customer ">Delete a customer</button>{% endif %}
             {% if 'read:my_company' in perms %}<button type="button" class="prompt-chip" data-prompt="Show my pending approval requests">Pending approvals</button>{% endif %}
             {% if 'read:my_customers' in perms %}<button type="button" class="prompt-chip" data-prompt="List all my customers">List my customers</button>{% endif %}

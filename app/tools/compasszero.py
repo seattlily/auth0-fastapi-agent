@@ -34,6 +34,7 @@ from mock_data import (
     get_trip,
     get_trips,
     remove_customer,
+    remove_experience,
     remove_travel_agent,
 )
 
@@ -231,6 +232,27 @@ async def cancel_trip(args: dict, ctx: dict) -> str:
 
     trip["status"] = "cancelled"
     return json.dumps({"ok": True, "trip": trip})
+
+
+async def cancel_experience(args: dict, ctx: dict) -> str:
+    require(ctx, "book:experiences")
+    experience_id = args.get("experience_id", "")
+    from mock_data import EXPERIENCES
+    exp = next((e for e in EXPERIENCES if e["id"] == experience_id), None)
+    if not exp:
+        return json.dumps({"error": f"unknown experience_id: {experience_id}"})
+    customer = get_customer(exp["customer_id"])
+    if not has_permission(ctx, "manage:companies"):
+        if not customer or customer["org_name"] != ctx.get("org_name"):
+            raise PermissionDenied(
+                f"Experience {experience_id} is outside your organization."
+            )
+    binding = f"Approve cancelling experience {experience_id} ({exp['name']})"
+    err = await _ciba_step_up(ctx, binding)
+    if err:
+        return err
+    removed = remove_experience(experience_id)
+    return json.dumps({"ok": True, "removed": removed})
 
 
 # ---------- flight search (mock) ----------
@@ -1114,6 +1136,31 @@ TOOLS: dict[str, dict] = {
                         "trip_id": {"type": "string", "description": "Trip ID (tr_xxx) to cancel."},
                     },
                     "required": ["trip_id"],
+                },
+            },
+        },
+    },
+    "cancel_experience": {
+        "required_scopes": ("book:experiences",),
+        "fn": cancel_experience,
+        "schema": {
+            "type": "function",
+            "function": {
+                "name": "cancel_experience",
+                "description": (
+                    "Permanently remove a booked experience. Requires CIBA "
+                    "step-up — the user must approve on their enrolled device. "
+                    "Agents can only cancel experiences for customers in their org."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "experience_id": {
+                            "type": "string",
+                            "description": "Experience ID (ex_xxx) to cancel.",
+                        },
+                    },
+                    "required": ["experience_id"],
                 },
             },
         },

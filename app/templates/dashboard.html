@@ -112,6 +112,34 @@
     {% endif %}
 </div>
 
+<div class="card">
+    <h2>Recent bookings</h2>
+    {% if bookings %}
+    <table>
+        <thead><tr><th>Booking</th><th>Customer</th><th>Where / What</th><th>When</th><th>Cost</th><th>Status</th></tr></thead>
+        <tbody>
+        {% for b in bookings %}
+        {% if b.status != 'pending' %}
+            <tr>
+                <td>
+                    {% if b.link %}<a href="{{ b.link }}"><code>{{ b.id }}</code></a>{% else %}<code>{{ b.id }}</code>{% endif %}
+                    <div class="muted" style="font-size:0.78rem;">{{ b.kind }}</div>
+                </td>
+                <td>{{ customer_names.get(b.customer_id, b.customer_id) }}</td>
+                <td>{{ b.summary }}{% if b.location and b.kind == 'experience' %} <span class="muted">({{ b.location }})</span>{% endif %}</td>
+                <td>{{ b.date_label }}</td>
+                <td>{{ b.currency }} {{ '{:,.0f}'.format(b.cost) }}</td>
+                <td><span class="status-badge {{ b.status }}">{{ b.status }}</span></td>
+            </tr>
+        {% endif %}
+        {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <p class="muted">No bookings yet for your customers.</p>
+    {% endif %}
+</div>
+
 {% elif ctx.role == 'customer' %}
 
 {% if my_company %}

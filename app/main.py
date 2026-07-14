@@ -167,6 +167,7 @@ CIBA_GATED_CHAT_TOOLS = {
     "book_trip",
     "book_customer_experience",
     "cancel_trip",
+    "cancel_experience",
     "create_auth0_organization",
     "create_travel_agent",
     "delete_auth0_organization",
