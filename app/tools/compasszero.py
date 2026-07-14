@@ -28,10 +28,12 @@ from mock_data import (
     get_companies,
     get_company,
     get_customer,
+    get_customer_by_email,
     get_customers,
     get_experiences_for_trip,
     get_trip,
     get_trips,
+    remove_customer,
     remove_travel_agent,
 )
 
@@ -857,6 +859,84 @@ async def create_my_customer(args: dict, ctx: dict) -> str:
     )
 
 
+async def delete_customer(args: dict, ctx: dict) -> str:
+    """Travel-agent: remove a customer from the organization — strips them
+    from the Auth0 org, deletes the Auth0 user, and drops the local record.
+    Requires CIBA step-up. Agents can only delete customers in their own org."""
+    require(ctx, "book:trips")
+    from .auth0_management import (
+        ManagementError,
+        delete_user,
+        find_user_by_email,
+        get_organization_by_name,
+        remove_organization_member,
+    )
+
+    org_name = ctx.get("org_name")
+    if not org_name:
+        return json.dumps(
+            {"error": "no org_name on your token — log in via your travel agency's organization"}
+        )
+
+    identifier = (args.get("customer_id") or "").strip()
+    email = (args.get("email") or "").strip()
+    if not identifier and not email:
+        return json.dumps({"error": "provide either customer_id or email."})
+
+    # Resolve customer from local records
+    if identifier:
+        customer = get_customer(identifier)
+    else:
+        customer = get_customer_by_email(email)
+
+    if not customer:
+        return json.dumps({"error": f"no customer found for {identifier or email}."})
+    if customer["org_name"] != org_name:
+        return json.dumps({"error": "that customer is not in your organization."})
+
+    email = customer["email"]
+
+    try:
+        org = await get_organization_by_name(org_name)
+    except ManagementError as e:
+        return json.dumps({"error": str(e)})
+    if not org:
+        return json.dumps({"error": f"no Auth0 organization named '{org_name}'."})
+
+    try:
+        auth0_user = await find_user_by_email(email)
+    except ManagementError as e:
+        return json.dumps({"error": str(e)})
+
+    binding = f"Approve DELETING customer {customer['name']} ({email}) from {org_name}"
+    err = await _ciba_step_up(ctx, binding)
+    if err:
+        return err
+
+    deleted_user_id = None
+    if auth0_user:
+        user_id = auth0_user["user_id"]
+        try:
+            await remove_organization_member(org["id"], user_id)
+            await delete_user(user_id)
+            deleted_user_id = user_id
+        except ManagementError as e:
+            return json.dumps({"error": str(e)})
+
+    removed = remove_customer(customer["id"])
+    return json.dumps(
+        {
+            "ok": True,
+            "removed_customer": removed,
+            "deleted_auth0_user_id": deleted_user_id,
+            "note": (
+                None if deleted_user_id
+                else "No Auth0 user found for this email — only the local record was removed."
+            ),
+        }
+    )
+
+
 # ---------- tool registry ----------
 
 
@@ -1338,6 +1418,37 @@ TOOLS: dict[str, dict] = {
                         "email": {"type": "string", "description": "Customer's email address."},
                     },
                     "required": ["name", "email"],
+                },
+            },
+        },
+    },
+    "delete_customer": {
+        "required_scopes": ("book:trips",),
+        "fn": delete_customer,
+        "schema": {
+            "type": "function",
+            "function": {
+                "name": "delete_customer",
+                "description": (
+                    "Permanently remove a customer from the organization. "
+                    "Strips the customer from the Auth0 organization, deletes "
+                    "the Auth0 user account, and removes the local record. "
+                    "Requires CIBA step-up (device approval). Agents can only "
+                    "delete customers in their own org. Provide either "
+                    "customer_id or email to identify the customer."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "customer_id": {
+                            "type": "string",
+                            "description": "Local customer ID (e.g. cu_001). Preferred if known.",
+                        },
+                        "email": {
+                            "type": "string",
+                            "description": "Customer email address. Used if customer_id is not available.",
+                        },
+                    },
                 },
             },
         },

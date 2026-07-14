@@ -251,6 +251,16 @@ def add_company(org_name: str, display_name: str, budget: float, currency: str =
     return company
 
 
+def remove_customer(customer_id: str) -> Optional[dict]:
+    """Remove a customer by ID from the local list. Returns the removed
+    record or None if no match."""
+    for c in list(CUSTOMERS):
+        if c["id"] == customer_id:
+            CUSTOMERS.remove(c)
+            return c
+    return None
+
+
 def remove_travel_agent(email: str, org_name: str) -> Optional[dict]:
     """Remove a travel agent matching email + org_name from the local
     list. Returns the removed record or None if no match."""

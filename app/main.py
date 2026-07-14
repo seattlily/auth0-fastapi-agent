@@ -171,6 +171,7 @@ CIBA_GATED_CHAT_TOOLS = {
     "create_travel_agent",
     "delete_auth0_organization",
     "delete_travel_agent",
+    "delete_customer",
 }
 
 
