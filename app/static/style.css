@@ -661,10 +661,8 @@ table tbody tr:hover { background: var(--surface-alt); }
 }
 .agent-log-layer-agent  .agent-log-layer-badge { background: color-mix(in srgb, var(--brand) 12%, var(--surface)); color: var(--brand-dark); }
 .agent-log-layer-google .agent-log-layer-badge { background: #e8f5e9; color: #1b5e20; }
-.agent-log-layer-auth0  .agent-log-layer-badge { background: #fff3e0; color: #e65100; }
 .agent-log-layer-app    .agent-log-layer-badge { background: var(--surface-alt); color: var(--muted); border: 1px solid var(--border-soft); }
 [data-theme="dark"] .agent-log-layer-google .agent-log-layer-badge { background: #1b3a1e; color: #a5d6a7; }
-[data-theme="dark"] .agent-log-layer-auth0  .agent-log-layer-badge { background: #3e2000; color: #ffcc80; }
 
 .agent-log-entry-name {
     font-family: var(--mono);

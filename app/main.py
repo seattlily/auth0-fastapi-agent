@@ -483,31 +483,18 @@ _GOOGLE_LAYER_TOOLS = {
     "list_recent_emails",
 }
 
-# Tools that call Auth0 Management API.
-_AUTH0_LAYER_TOOLS = {
-    "create_auth0_organization",
-    "delete_auth0_organization",
-    "create_travel_agent",
-    "delete_travel_agent",
-    "create_my_customer",
-    "delete_customer",
-}
-
 
 def _tool_layer(name: str) -> str:
     """Classify a tool call into a display layer for the activity log.
 
     - 'agent'  — AI reading/searching, no external write side-effects
     - 'google' — calls Google APIs via Token Vault
-    - 'auth0'  — calls Auth0 Management API
-    - 'app'    — app executing a write against local data or other APIs
+    - 'app'    — app executing a write (including Auth0 Management API calls)
     """
     if name in _AGENT_LAYER_TOOLS:
         return "agent"
     if name in _GOOGLE_LAYER_TOOLS:
         return "google"
-    if name in _AUTH0_LAYER_TOOLS:
-        return "auth0"
     return "app"
 
 
