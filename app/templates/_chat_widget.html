@@ -31,34 +31,35 @@
         {% endif %}
     </div>
 
-    {% if ctx and not messages %}
+    {% if ctx %}
+        {% set perms = ctx.permissions or [] %}
         {% if ctx.role == 'compass_admin' %}
         <div class="prompt-chips" aria-label="Suggested prompts">
             <span class="prompt-chips-label">Try:</span>
-            <button type="button" class="prompt-chip" data-prompt="Create a new organization called ">Create a new org</button>
-            <button type="button" class="prompt-chip" data-prompt="Add a new travel agent ">Add a travel agent</button>
-            <button type="button" class="prompt-chip" data-prompt="List all travel agents">List all agents</button>
-            <button type="button" class="prompt-chip" data-prompt="Generate a Compass0 contract for ">Generate a contract</button>
-            <button type="button" class="prompt-chip" data-prompt="List organizations with the most spend">Top spenders</button>
-            <button type="button" class="prompt-chip" data-prompt="List all customers">List all customers</button>
+            {% if 'manage:companies' in perms %}<button type="button" class="prompt-chip" data-prompt="Create a new organization called ">Create a new org</button>{% endif %}
+            {% if 'manage:companies' in perms %}<button type="button" class="prompt-chip" data-prompt="Add a new travel agent ">Add a travel agent</button>{% endif %}
+            {% if 'manage:companies' in perms %}<button type="button" class="prompt-chip" data-prompt="List all travel agents">List all agents</button>{% endif %}
+            {% if 'manage:companies' in perms %}<button type="button" class="prompt-chip" data-prompt="Generate a Compass0 contract for ">Generate a contract</button>{% endif %}
+            {% if 'read:all_companies' in perms %}<button type="button" class="prompt-chip" data-prompt="List all organizations">List organizations</button>{% endif %}
+            {% if 'read:all_customers' in perms %}<button type="button" class="prompt-chip" data-prompt="List all customers">List all customers</button>{% endif %}
         </div>
         {% elif ctx.role == 'travel_agent' %}
         <div class="prompt-chips" aria-label="Suggested prompts">
             <span class="prompt-chips-label">Try:</span>
-            <button type="button" class="prompt-chip" data-prompt="Book a flight ">Book a flight</button>
-            <button type="button" class="prompt-chip" data-prompt="Book an experience ">Book an experience</button>
-            <button type="button" class="prompt-chip" data-prompt="Add a new customer named ">Add a customer</button>
-            <button type="button" class="prompt-chip" data-prompt="Show my pending approval requests">Pending approvals</button>
-            <button type="button" class="prompt-chip" data-prompt="List all my customers">List my customers</button>
+            {% if 'book:trips' in perms %}<button type="button" class="prompt-chip" data-prompt="Book a flight ">Book a flight</button>{% endif %}
+            {% if 'book:experiences' in perms %}<button type="button" class="prompt-chip" data-prompt="Book an experience ">Book an experience</button>{% endif %}
+            {% if 'book:trips' in perms %}<button type="button" class="prompt-chip" data-prompt="Add a new customer named ">Add a customer</button>{% endif %}
+            {% if 'read:my_company' in perms %}<button type="button" class="prompt-chip" data-prompt="Show my pending approval requests">Pending approvals</button>{% endif %}
+            {% if 'read:my_customers' in perms %}<button type="button" class="prompt-chip" data-prompt="List all my customers">List my customers</button>{% endif %}
         </div>
         {% elif ctx.role == 'customer' %}
         <div class="prompt-chips" aria-label="Suggested prompts">
             <span class="prompt-chips-label">Try:</span>
             <button type="button" class="prompt-chip" data-prompt="Search for flights ">Search for flights</button>
-            <button type="button" class="prompt-chip" data-prompt="Request a trip to ">Request a trip</button>
-            <button type="button" class="prompt-chip" data-prompt="List my trips">List my trips</button>
-            <button type="button" class="prompt-chip" data-prompt="Add my next trip to Google Calendar">Add trip to Calendar</button>
-            <button type="button" class="prompt-chip" data-prompt="Show my upcoming bookings">Upcoming bookings</button>
+            {% if 'read:my_trips' in perms %}<button type="button" class="prompt-chip" data-prompt="Request a trip to ">Request a trip</button>{% endif %}
+            {% if 'read:my_trips' in perms %}<button type="button" class="prompt-chip" data-prompt="List my trips">List my trips</button>{% endif %}
+            {% if 'read:my_trips' in perms %}<button type="button" class="prompt-chip" data-prompt="Add my next trip to Google Calendar">Add trip to Calendar</button>{% endif %}
+            {% if 'read:my_trips' in perms %}<button type="button" class="prompt-chip" data-prompt="Show my upcoming bookings">Upcoming bookings</button>{% endif %}
         </div>
         {% endif %}
     {% endif %}
@@ -295,10 +296,6 @@ document.querySelectorAll('.message.assistant .content').forEach((el) => {
 
         input.value = '';
         input.disabled = true;
-
-        // Hide prompt chips on first message
-        const chips = document.querySelector('.prompt-chips');
-        if (chips) chips.style.display = 'none';
 
         addMessage('user', text, false);
         const assistantContent = addMessage('assistant', '', true);
