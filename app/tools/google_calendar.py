@@ -19,6 +19,29 @@ class TokenVaultError(RuntimeError):
     pass
 
 
+async def get_google_account_email(access_token: str) -> str | None:
+    """Return the email of the Google account that owns this access token."""
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        resp = await client.get(
+            "https://www.googleapis.com/oauth2/v3/userinfo",
+            headers={"Authorization": f"Bearer {access_token}"},
+        )
+    if resp.status_code == 200:
+        return resp.json().get("email")
+    return None
+
+
+def _calendar_link_for_account(html_link: str | None, email: str | None) -> str | None:
+    """Append authuser=<email> to a Google Calendar htmlLink so it opens
+    in the Token Vault connected account rather than the browser default."""
+    if not html_link:
+        return html_link
+    if not email:
+        return html_link
+    sep = "&" if "?" in html_link else "?"
+    return f"{html_link}{sep}authuser={email}"
+
+
 async def get_federated_access_token(
     refresh_token: str, connection: str = "google-oauth2"
 ) -> str:
@@ -113,14 +136,18 @@ async def create_calendar_event(
         .execute()
     )
 
+    google_email = await get_google_account_email(google_access_token)
+    html_link = _calendar_link_for_account(created.get("htmlLink"), google_email)
+
     return json.dumps(
         {
             "id": created.get("id"),
-            "htmlLink": created.get("htmlLink"),
+            "htmlLink": html_link,
             "summary": created.get("summary"),
             "start": created.get("start"),
             "end": created.get("end"),
             "location": created.get("location"),
+            "calendar_account": google_email,
         }
     )
 
