@@ -36,6 +36,7 @@ from mock_data import (
     remove_customer,
     remove_experience,
     remove_travel_agent,
+    resolve_customer,
 )
 
 
@@ -180,10 +181,9 @@ async def _ciba_step_up(ctx: dict, binding_message: str) -> str | None:
 
 async def book_trip(args: dict, ctx: dict) -> str:
     require(ctx, "book:trips")
-    # Agents can only book for customers in their own org; admins can book for anyone.
-    customer = get_customer(args["customer_id"])
+    customer = resolve_customer(args["customer_id"])
     if not customer:
-        return json.dumps({"error": f"unknown customer_id: {args['customer_id']}"})
+        return json.dumps({"error": f"customer not found: {args['customer_id']}"})
     if not has_permission(ctx, "manage:companies"):
         if customer["org_name"] != ctx.get("org_name"):
             raise PermissionDenied(
@@ -199,7 +199,7 @@ async def book_trip(args: dict, ctx: dict) -> str:
         return err
 
     trip = add_trip(
-        customer_id=args["customer_id"],
+        customer_id=customer["id"],
         type=args["type"],
         origin=args["origin"],
         destination=args["destination"],
@@ -431,10 +431,10 @@ async def book_customer_experience(args: dict, ctx: dict) -> str:
     attached — e.g. a one-off cooking class or wine tasting that
     isn't part of a trip booking."""
     require(ctx, "book:experiences")
-    customer = get_customer(args["customer_id"])
+    customer = resolve_customer(args["customer_id"])
     if not customer:
         return json.dumps(
-            {"error": f"unknown customer_id: {args['customer_id']}"}
+            {"error": f"customer not found: {args['customer_id']}"}
         )
     if not has_permission(ctx, "manage:companies"):
         if customer["org_name"] != ctx.get("org_name"):
@@ -443,14 +443,14 @@ async def book_customer_experience(args: dict, ctx: dict) -> str:
             )
 
     binding = (
-        f"Approve booking activity for customer {args['customer_id']}"
+        f"Approve booking activity for customer {customer['name']} ({customer['id']})"
     )
     err = await _ciba_step_up(ctx, binding)
     if err:
         return err
 
     experience = add_experience(
-        customer_id=args["customer_id"],
+        customer_id=customer["id"],
         name=args["name"],
         date=args["date"],
         cost=float(args["cost"]),
@@ -1102,7 +1102,7 @@ TOOLS: dict[str, dict] = {
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "customer_id":  {"type": "string", "description": "Customer ID (cu_xxx). Use list_my_customers to find IDs."},
+                        "customer_id":  {"type": "string", "description": "Customer ID (cu_xxx), email, or full name. Use list_my_customers if unsure."},
                         "type":         {"type": "string", "enum": ["flight", "hotel", "train"]},
                         "origin":       {"type": "string", "description": "Origin city or IATA code."},
                         "destination":  {"type": "string", "description": "Destination city or IATA code."},
@@ -1215,7 +1215,7 @@ TOOLS: dict[str, dict] = {
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "customer_id": {"type": "string", "description": "Customer ID (cu_xxx)."},
+                        "customer_id": {"type": "string", "description": "Customer ID (cu_xxx), email, or full name."},
                         "name":        {"type": "string", "description": "Experience name (e.g., 'Tuscan cooking class')."},
                         "date":        {"type": "string", "description": "Date YYYY-MM-DD."},
                         "cost":        {"type": "number", "description": "Cost."},

@@ -117,6 +117,23 @@ def get_customer(customer_id: str) -> Optional[dict]:
     return next((c for c in CUSTOMERS if c["id"] == customer_id), None)
 
 
+def resolve_customer(identifier: str) -> Optional[dict]:
+    """Resolve a customer by ID, email, or name (case-insensitive)."""
+    if not identifier:
+        return None
+    s = identifier.strip()
+    by_id = get_customer(s)
+    if by_id:
+        return by_id
+    sl = s.lower()
+    return next(
+        (c for c in CUSTOMERS if
+         (c.get("email") or "").lower() == sl or
+         (c.get("name") or "").lower() == sl),
+        None,
+    )
+
+
 def get_customer_by_email(email: str) -> Optional[dict]:
     e = (email or "").strip().lower()
     if not e:
