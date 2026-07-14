@@ -694,6 +694,22 @@ table tbody tr:hover { background: var(--surface-alt); }
 }
 .chat-ciba-banner-body strong:first-child { color: #b45309; }
 [data-theme="dark"] .chat-ciba-banner-body strong:first-child { color: #fbbf24; }
+.chat-ciba-resend-btn {
+    flex-shrink: 0;
+    padding: 0.35rem 0.75rem;
+    border-radius: var(--radius);
+    border: 1.5px solid #f59e0b;
+    background: transparent;
+    color: #b45309;
+    font-size: 0.82rem;
+    font-weight: 600;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: background 0.15s;
+}
+.chat-ciba-resend-btn:hover { background: rgba(245, 158, 11, 0.15); }
+.chat-ciba-resend-btn:disabled { opacity: 0.6; cursor: not-allowed; }
+[data-theme="dark"] .chat-ciba-resend-btn { color: #fbbf24; }
 .chat-ciba-banner-spinner {
     width: 20px;
     height: 20px;

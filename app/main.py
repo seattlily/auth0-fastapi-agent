@@ -714,12 +714,28 @@ def build_system_prompt(user: dict | None, ctx: dict) -> str:
         "the request itself is genuinely ambiguous (e.g., 'fix the trip' — "
         "which trip?). If a user asks for something outside their role, "
         "politely explain what they can do instead.\n\n"
-        "Roles are distinct: admins (compass_admin) manage organizations and "
-        "travel agents only; travel agents manage customers and bookings. If "
-        "an admin asks to add a customer, decline politely and offer to add "
-        "a travel agent (use create_travel_agent) or a new organization "
+        "Experience booking — always present options first: when the user "
+        "wants to book or request an experience (activity, workshop, tour, "
+        "etc.), call search_experiences first and present the results as a "
+        "numbered list showing name, location, price, and the available time "
+        "slots from the 'available_times' field on each result. Wait for the "
+        "user to choose an experience AND a specific time before calling "
+        "book_customer_experience, book_experience, or request_experience. "
+        "Never auto-select an experience or time slot without asking.\n\n"
+        "Roles are distinct:\n"
+        "- compass_admin: manages organizations (create_auth0_organization, "
+        "delete_auth0_organization) and travel agents (create_travel_agent, "
+        "delete_travel_agent) only. Admins do NOT manage customers. If a "
+        "compass_admin asks to add a customer, decline politely and offer to "
+        "add a travel agent (create_travel_agent) or a new organization "
         "instead — never repurpose another tool to create a customer for an "
-        "admin.\n\n"
+        "admin.\n"
+        "- travel_agent: manages customers and bookings. Adding customers is "
+        "a core travel-agent task — use create_my_customer to add new "
+        "customers to your organization whenever asked. Use book_trip and "
+        "book_customer_experience to book travel for existing customers.\n"
+        "- customer: can search flights and experiences, view trips, and "
+        "submit booking requests. Cannot book directly.\n\n"
         "Booking approvals: customers cannot book directly. When a customer "
         "asks to 'book' something, route them to request_trip / "
         "request_experience instead — that creates a pending request a "
@@ -1533,6 +1549,22 @@ async def chat_clear(request: Request, response: Response):
         return JSONResponse({"error": "unauthorized"}, status_code=401)
     request.session["conversation"] = []
     return JSONResponse({"ok": True})
+
+
+@app.post("/chat/ciba-resend")
+async def chat_ciba_resend(request: Request, response: Response):
+    """Signal that the user wants a new CIBA push notification. The active
+    poll_for_token call in step_up will detect the event, abort the old
+    auth_req_id, and call bc-authorize again to send a fresh push."""
+    user, session, _ = await require_login(request, response)
+    if not user:
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+    sub = (user or {}).get("sub")
+    if not sub:
+        return JSONResponse({"error": "no user sub"}, status_code=400)
+    from tools.auth0_ciba import signal_resend
+    found = signal_resend(sub)
+    return JSONResponse({"ok": True, "sent": found})
 
 
 # ---------- MFA enrollment (Guardian ticket) ----------

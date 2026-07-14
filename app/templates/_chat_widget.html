@@ -69,6 +69,7 @@
             <strong>Approval required</strong>
             <span id="chat-ciba-banner-elapsed"> — open <strong>Auth0 Guardian</strong> on your phone and tap Approve to continue.</span>
         </div>
+        <button type="button" id="chat-ciba-resend" class="chat-ciba-resend-btn">Resend push</button>
         <div class="chat-ciba-banner-spinner" aria-hidden="true"></div>
     </div>
 
@@ -138,6 +139,25 @@ document.querySelectorAll('.message.assistant .content').forEach((el) => {
         if (cibaTimerHandle) { clearInterval(cibaTimerHandle); cibaTimerHandle = null; }
         cibaStartTime = null;
         if (cibaBannerElapsed) cibaBannerElapsed.innerHTML = ' — open <strong>Auth0 Guardian</strong> on your phone and tap Approve to continue.';
+    }
+
+    const cibaResendBtn = document.getElementById('chat-ciba-resend');
+    if (cibaResendBtn) {
+        cibaResendBtn.addEventListener('click', async () => {
+            cibaResendBtn.disabled = true;
+            cibaResendBtn.textContent = 'Sending…';
+            try {
+                const resp = await fetch('/chat/ciba-resend', { method: 'POST' });
+                const data = await resp.json();
+                cibaResendBtn.textContent = data.ok ? 'Sent!' : 'No active session';
+            } catch (err) {
+                cibaResendBtn.textContent = 'Failed';
+            }
+            setTimeout(() => {
+                cibaResendBtn.disabled = false;
+                cibaResendBtn.textContent = 'Resend push';
+            }, 3000);
+        });
     }
 
     document.querySelectorAll('.prompt-chip').forEach((chip) => {

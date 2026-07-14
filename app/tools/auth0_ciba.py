@@ -28,6 +28,36 @@ import httpx
 
 
 CIBA_GRANT = "urn:openid:params:grant-type:ciba"
+
+# Keyed by user_sub: event is set when the user clicks "Resend push".
+# step_up() watches this; the /chat/ciba-resend endpoint sets it.
+_resend_events: dict[str, asyncio.Event] = {}
+
+
+def prepare_resend(user_sub: str) -> asyncio.Event:
+    """Create/reset the resend event for a CIBA session. Called by step_up."""
+    event = asyncio.Event()
+    _resend_events[user_sub] = event
+    return event
+
+
+def signal_resend(user_sub: str) -> bool:
+    """Set the resend event for user_sub. Returns True if an active CIBA
+    session exists for that user."""
+    event = _resend_events.get(user_sub)
+    if event:
+        event.set()
+        return True
+    return False
+
+
+def cleanup_resend(user_sub: str) -> None:
+    _resend_events.pop(user_sub, None)
+
+
+class _CibaResendRequested(Exception):
+    """Internal signal: poll_for_token raises this when the resend event fires.
+    step_up catches it and loops back to call bc-authorize again."""
 LOGIN_HINT_FORMAT = "iss_sub"
 BINDING_MESSAGE_MAX = 64  # Auth0's hard cap on binding_message length
 
@@ -196,14 +226,23 @@ async def poll_for_token(
     *,
     max_seconds: int = 30,
     interval: int = 2,
+    resend_event: asyncio.Event | None = None,
 ) -> dict[str, Any]:
     """Poll /oauth/token for the result of a CIBA request. Returns the
     token set on approval. Raises CibaError on denial, expiry, or if
-    the deadline elapses without a decision."""
+    the deadline elapses without a decision.
+
+    resend_event: if set, the poll loop checks it after each sleep chunk.
+    When fired, raises _CibaResendRequested so step_up can loop back and
+    send a new push via bc-authorize."""
     deadline = time.time() + max_seconds
     current_interval = max(1, interval)
 
     while True:
+        if resend_event and resend_event.is_set():
+            resend_event.clear()
+            raise _CibaResendRequested()
+
         async with httpx.AsyncClient(timeout=15.0) as client:
             resp = await client.post(
                 f"https://{_domain()}/oauth/token",
@@ -227,12 +266,21 @@ async def poll_for_token(
         if code in ("authorization_pending", "slow_down"):
             if code == "slow_down":
                 current_interval += 1
-            if time.time() + current_interval > deadline:
+            wait = current_interval
+            if time.time() + wait > deadline:
                 raise CibaError(
                     f"Polling timed out after {max_seconds}s without an "
                     "approve/deny on the device."
                 )
-            await asyncio.sleep(current_interval)
+            # Sleep in small chunks so we can react to resend quickly.
+            chunk = 0.25
+            slept = 0.0
+            while slept < wait:
+                if resend_event and resend_event.is_set():
+                    resend_event.clear()
+                    raise _CibaResendRequested()
+                await asyncio.sleep(min(chunk, wait - slept))
+                slept += chunk
             continue
 
         # Terminal: access_denied / expired_token / invalid_request / etc.
@@ -256,29 +304,40 @@ async def step_up(
     audience: str | None = None,
     max_seconds: int = 180,
 ) -> dict[str, Any]:
-    """One-shot step-up: initiate the CIBA request, then poll until
-    the user approves on their device. Returns the resulting token
-    set; raises CibaError on any failure.
+    """Step-up: initiate the CIBA request, poll until the user approves on
+    their device. If the user clicks "Resend push" in the UI while waiting,
+    the resend event fires, this function loops back and calls bc-authorize
+    again so a new push is sent to the device.
 
-    Skipped (returns {"bypassed": True}) when CIBA_REQUIRED env var is
-    set to a falsy value — useful when iterating on the demo without
-    having Guardian push set up yet."""
+    Returns the token set on approval; raises CibaError on any failure.
+    Skipped (returns {"bypassed": True}) when CIBA_REQUIRED env var is falsy."""
     if not is_ciba_required():
         return {"bypassed": True}
     if not user_sub:
         raise CibaError("missing user sub for CIBA step-up")
-    init = await initiate_bc_authorize(
-        login_hint=login_hint_for_user_sub(user_sub),
-        binding_message=binding_message,
-        audience=audience,
-    )
-    # Cap the polling deadline by the auth_req's actual expires_in,
-    # minus a small safety margin, so we never poll past the point
-    # where Auth0 would just return expired_token.
-    expires_in = int(init.get("expires_in") or 300)
-    poll_for = min(max_seconds, max(30, expires_in - 5))
-    return await poll_for_token(
-        init["auth_req_id"],
-        max_seconds=poll_for,
-        interval=int(init.get("interval", 2)),
-    )
+
+    login_hint = login_hint_for_user_sub(user_sub)
+    resend_event = prepare_resend(user_sub)
+    try:
+        while True:
+            init = await initiate_bc_authorize(
+                login_hint=login_hint,
+                binding_message=binding_message,
+                audience=audience,
+            )
+            # Cap polling by the auth_req's actual expires_in so we never
+            # poll past the point where Auth0 would return expired_token.
+            expires_in = int(init.get("expires_in") or 300)
+            poll_for = min(max_seconds, max(30, expires_in - 5))
+            try:
+                return await poll_for_token(
+                    init["auth_req_id"],
+                    max_seconds=poll_for,
+                    interval=int(init.get("interval", 2)),
+                    resend_event=resend_event,
+                )
+            except _CibaResendRequested:
+                # User clicked "Resend push" — loop back and send a new push.
+                continue
+    finally:
+        cleanup_resend(user_sub)
