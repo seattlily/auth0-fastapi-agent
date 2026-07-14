@@ -214,24 +214,43 @@ document.querySelectorAll('.message.assistant .content').forEach((el) => {
         return s.length > 40 ? s.slice(0, 40) + '…' : s;
     }
 
-    function principalLabel(p) {
-        if (!p) return null;
-        const parts = [];
-        if (p.agent_id) {
-            parts.push('🤖 ' + p.agent_id);
-        } else {
-            parts.push('⚙️ app');
-        }
-        if (p.user_name || p.user_sub) {
-            let user = '👤 ' + (p.user_name || p.user_sub);
-            if (p.user_role) user += ' (' + p.user_role + ')';
-            if (p.org_name) user += ' · ' + p.org_name;
-            parts.push(user);
-        }
-        return parts.join(' → ');
+    const LAYER_META = {
+        agent:  { icon: '🤖', label: 'AI Agent',    cls: 'agent-log-layer-agent'  },
+        google: { icon: '🔗', label: 'Token Vault',  cls: 'agent-log-layer-google' },
+        auth0:  { icon: '🔐', label: 'Auth0 Mgmt',   cls: 'agent-log-layer-auth0'  },
+        app:    { icon: '⚙️', label: 'App',          cls: 'agent-log-layer-app'    },
+    };
+
+    function addUserTurnEntry(msg) {
+        if (!logEntries) return;
+        const empty = document.getElementById('agent-log-empty');
+        if (empty) empty.remove();
+
+        const entry = document.createElement('div');
+        entry.className = 'agent-log-entry agent-log-user-turn';
+
+        const header = document.createElement('div');
+        header.className = 'agent-log-user-turn-header';
+        let who = '👤 User';
+        if (msg.user_name) who += ' · ' + msg.user_name;
+        if (msg.user_role) who += ' (' + msg.user_role + ')';
+        if (msg.org_name)  who += ' · ' + msg.org_name;
+        header.textContent = who;
+        entry.appendChild(header);
+
+        const text = document.createElement('div');
+        text.className = 'agent-log-user-turn-text';
+        const content = (msg.message || '').length > 120
+            ? (msg.message || '').slice(0, 120) + '…'
+            : (msg.message || '');
+        text.textContent = '"' + content + '"';
+        entry.appendChild(text);
+
+        logEntries.appendChild(entry);
+        entry.scrollIntoView({ block: 'nearest' });
     }
 
-    function addLogEntry(id, name, args, ciba, reasoning, principal) {
+    function addLogEntry(id, name, args, ciba, reasoning, principal, layer) {
         if (logEntries) {
             const empty = document.getElementById('agent-log-empty');
             if (empty) empty.remove();
@@ -242,22 +261,47 @@ document.querySelectorAll('.message.assistant .content').forEach((el) => {
                 logCount.style.display = '';
             }
 
+            const meta = LAYER_META[layer] || LAYER_META.app;
             const entry = document.createElement('div');
-            entry.className = 'agent-log-entry' + (reasoning ? ' agent-log-reasoning' : '') + (ciba ? ' agent-log-ciba' : '');
+            entry.className = [
+                'agent-log-entry',
+                meta.cls,
+                reasoning ? 'agent-log-reasoning' : '',
+                ciba      ? 'agent-log-ciba'      : '',
+            ].filter(Boolean).join(' ');
             entry.dataset.tcid = id;
             if (ciba) entry.dataset.ciba = '1';
 
-            const nameEl = document.createElement('div');
-            nameEl.className = 'agent-log-entry-name';
-            nameEl.textContent = reasoning ? '💭 Reasoning' : name;
-            entry.appendChild(nameEl);
+            // Layer badge + tool name row
+            const nameRow = document.createElement('div');
+            nameRow.className = 'agent-log-entry-name-row';
 
-            const label = principalLabel(principal);
-            if (label) {
+            const badge = document.createElement('span');
+            badge.className = 'agent-log-layer-badge';
+            badge.textContent = meta.icon + ' ' + meta.label;
+            nameRow.appendChild(badge);
+
+            const nameEl = document.createElement('span');
+            nameEl.className = 'agent-log-entry-name';
+            nameEl.textContent = reasoning ? 'Reasoning' : name;
+            nameRow.appendChild(nameEl);
+            entry.appendChild(nameRow);
+
+            // Principal: agent acting on behalf of user
+            if (principal && !reasoning) {
                 const principalEl = document.createElement('div');
                 principalEl.className = 'agent-log-entry-principal';
-                principalEl.textContent = label;
-                entry.appendChild(principalEl);
+                let text = '';
+                if (principal.agent_id) {
+                    text += principal.agent_id;
+                }
+                if (principal.user_name || principal.user_sub) {
+                    const u = principal.user_name || principal.user_sub;
+                    text += (text ? ' → ' : '') + '👤 ' + u;
+                    if (principal.user_role) text += ' (' + principal.user_role + ')';
+                }
+                if (text) principalEl.textContent = text;
+                if (text) entry.appendChild(principalEl);
             }
 
             if (reasoning) {
@@ -354,12 +398,14 @@ document.querySelectorAll('.message.assistant .content').forEach((el) => {
                         let msg;
                         try { msg = JSON.parse(dataLine.slice(6)); } catch { continue; }
 
-                        if (msg.t === 'chunk') {
+                        if (msg.t === 'user_turn') {
+                            addUserTurnEntry(msg);
+                        } else if (msg.t === 'chunk') {
                             textContent += msg.v;
                             assistantContent.innerHTML = renderMarkdown(textContent);
                             messages.scrollTop = messages.scrollHeight;
                         } else if (msg.t === 'tool_call') {
-                            addLogEntry(msg.id, msg.name, msg.args, msg.ciba, msg.reasoning, msg.principal);
+                            addLogEntry(msg.id, msg.name, msg.args, msg.ciba, msg.reasoning, msg.principal, msg.layer);
                         } else if (msg.t === 'tool_result') {
                             updateLogEntry(msg.id, msg.ok, msg.ms, msg.summary);
                         }

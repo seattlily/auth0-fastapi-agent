@@ -617,6 +617,27 @@ table tbody tr:hover { background: var(--surface-alt); }
     padding: 2rem 0.75rem;
     line-height: 1.4;
 }
+/* user-initiated turn entry */
+.agent-log-user-turn {
+    background: color-mix(in srgb, var(--brand) 7%, var(--surface-alt));
+    border: 1px solid color-mix(in srgb, var(--brand) 25%, var(--border-soft));
+    border-left: 3px solid var(--brand);
+}
+.agent-log-user-turn-header {
+    font-size: 0.72rem;
+    font-weight: 600;
+    color: var(--brand-dark);
+    margin-bottom: 0.2rem;
+}
+.agent-log-user-turn-text {
+    font-size: 0.78rem;
+    color: var(--text);
+    font-style: italic;
+    line-height: 1.35;
+    word-break: break-word;
+}
+[data-theme="dark"] .agent-log-user-turn-header { color: var(--brand); }
+
 .agent-log-entry {
     background: var(--surface-alt);
     border: 1px solid var(--border-soft);
@@ -624,6 +645,27 @@ table tbody tr:hover { background: var(--surface-alt); }
     padding: 0.6rem 0.75rem;
     margin-bottom: 0.45rem;
 }
+.agent-log-entry-name-row {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    flex-wrap: wrap;
+}
+.agent-log-layer-badge {
+    font-size: 0.65rem;
+    font-weight: 600;
+    padding: 0.1rem 0.4rem;
+    border-radius: var(--radius-pill);
+    white-space: nowrap;
+    flex-shrink: 0;
+}
+.agent-log-layer-agent  .agent-log-layer-badge { background: color-mix(in srgb, var(--brand) 12%, var(--surface)); color: var(--brand-dark); }
+.agent-log-layer-google .agent-log-layer-badge { background: #e8f5e9; color: #1b5e20; }
+.agent-log-layer-auth0  .agent-log-layer-badge { background: #fff3e0; color: #e65100; }
+.agent-log-layer-app    .agent-log-layer-badge { background: var(--surface-alt); color: var(--muted); border: 1px solid var(--border-soft); }
+[data-theme="dark"] .agent-log-layer-google .agent-log-layer-badge { background: #1b3a1e; color: #a5d6a7; }
+[data-theme="dark"] .agent-log-layer-auth0  .agent-log-layer-badge { background: #3e2000; color: #ffcc80; }
+
 .agent-log-entry-name {
     font-family: var(--mono);
     font-size: 0.78rem;
@@ -631,8 +673,8 @@ table tbody tr:hover { background: var(--surface-alt); }
     color: var(--text);
 }
 .agent-log-entry-principal {
-    font-size: 0.68rem;
-    color: var(--brand);
+    font-size: 0.67rem;
+    color: var(--muted);
     margin-top: 0.15rem;
     font-weight: 500;
     white-space: nowrap;

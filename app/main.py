@@ -457,6 +457,59 @@ LLM_MODEL = os.environ.get("LLM_MODEL", "gpt-4o-mini")
 # agent activity log. If unset, tool calls are attributed to "app".
 AUTH0_AGENT_ID: str | None = os.environ.get("AUTH0_AGENT_ID")
 
+# Tools where the AI agent is purely reading/reasoning — no external
+# write side-effects. Shown as "agent" layer in the activity log.
+_AGENT_LAYER_TOOLS = {
+    "think",
+    "search_flights",
+    "search_experiences",
+    "list_my_trips",
+    "list_company_trips",
+    "list_all_trips",
+    "list_my_customers",
+    "list_all_customers",
+    "list_companies",
+    "list_travel_agents",
+    "list_pending_requests",
+    "get_trip_details",
+    "list_upcoming_calendar_events",
+    "list_recent_emails",
+}
+
+# Tools that call Google APIs via Token Vault.
+_GOOGLE_LAYER_TOOLS = {
+    "create_calendar_event",
+    "list_upcoming_calendar_events",
+    "list_recent_emails",
+}
+
+# Tools that call Auth0 Management API.
+_AUTH0_LAYER_TOOLS = {
+    "create_auth0_organization",
+    "delete_auth0_organization",
+    "create_travel_agent",
+    "delete_travel_agent",
+    "create_my_customer",
+    "delete_customer",
+}
+
+
+def _tool_layer(name: str) -> str:
+    """Classify a tool call into a display layer for the activity log.
+
+    - 'agent'  — AI reading/searching, no external write side-effects
+    - 'google' — calls Google APIs via Token Vault
+    - 'auth0'  — calls Auth0 Management API
+    - 'app'    — app executing a write against local data or other APIs
+    """
+    if name in _AGENT_LAYER_TOOLS:
+        return "agent"
+    if name in _GOOGLE_LAYER_TOOLS:
+        return "google"
+    if name in _AUTH0_LAYER_TOOLS:
+        return "auth0"
+    return "app"
+
 
 # ---------- documents ----------
 
@@ -1439,6 +1492,16 @@ async def chat_stream(request: Request, response: Response):
     )
 
     async def generate():
+        # Emit a user-initiated entry so the activity log always starts
+        # with who triggered this conversation turn.
+        yield "data: " + json.dumps({
+            "t": "user_turn",
+            "message": user_message,
+            "user_name": (user or {}).get("name"),
+            "user_role": ctx.get("role"),
+            "org_name": ctx.get("org_name"),
+        }) + "\n\n"
+
         try:
             for _ in range(MAX_TOOL_ITERATIONS):
                 kwargs = {"model": LLM_MODEL, "messages": messages, "stream": True}
@@ -1500,6 +1563,7 @@ async def chat_stream(request: Request, response: Response):
                         "args": args,
                         "ciba": name in CIBA_GATED_CHAT_TOOLS,
                         "reasoning": name == "think",
+                        "layer": _tool_layer(name),
                         "principal": {
                             "agent_id": AUTH0_AGENT_ID,
                             "user_sub": ctx.get("sub"),
