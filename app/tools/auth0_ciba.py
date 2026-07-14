@@ -89,11 +89,15 @@ truncate_binding = sanitize_binding
 NOT_ENROLLED_HINTS = (
     "user_not_eligible",
     "no_eligible",
+    "no eligible",                          # "No eligible notification channels were found"
     "no_push",
     "not enrolled",
     "no authenticators",
     "no authenticator",
     "no_authenticator",
+    "does not have push notifications",     # "User does not have push notifications set up"
+    "push notifications set up",
+    "no eligible notification channels",
 )
 ENROLLMENT_HINT_MSG = (
     "Looks like this user has no push authenticator enrolled in "
