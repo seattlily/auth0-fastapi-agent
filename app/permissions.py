@@ -55,6 +55,24 @@ def get_user_context(access_token_claims: dict | None, id_token_claims: dict | N
         )
         if claim_role in ("compass_admin", "travel_agent", "customer"):
             role = claim_role
+            # RBAC permissions claim is absent in the custom-claim fallback
+            # path (e.g. Okta SSO users). Synthesize role-appropriate
+            # permissions so tool visibility works correctly.
+            if not perms:
+                if role == "compass_admin":
+                    perms = {
+                        "manage:companies", "manage:agents",
+                        "read:all_companies", "read:all_customers",
+                        "read:all_trips", "read:my_company",
+                    }
+                elif role == "travel_agent":
+                    perms = {
+                        "book:trips", "book:experiences",
+                        "read:my_customers", "read:company_trips",
+                        "read:my_company",
+                    }
+                elif role == "customer":
+                    perms = {"read:my_trips", "read:my_company"}
     return {
         "permissions": perms,
         "role": role,

@@ -7,6 +7,11 @@
     <h1>Customers</h1>
     <span class="muted">{{ customers|length }} total{% if scope_label %} · {{ scope_label }}{% endif %}</span>
 </div>
+<div class="sub-nav">
+    <a href="/customers" class="active">Customers</a>
+    <a href="/trips">Trips</a>
+    <a href="/documents">Documents</a>
+</div>
 
 <div class="card">
     {% if customers %}

@@ -18,23 +18,16 @@
 </div>
 {% endif %}
 
-{% if ctx.role != 'customer' %}
 <div class="card" style="padding: 1.25rem 1.5rem;">
     <div style="display:flex; align-items:center; justify-content:space-between; gap:1rem; margin-bottom:0.85rem; flex-wrap:wrap;">
         <div>
             <h2 style="margin-bottom:0.15rem;">AI Assistant</h2>
-            <span class="muted" style="font-size:0.85rem;">{{ visible_tools|length }} tool{{ '' if visible_tools|length == 1 else 's' }} available for your role · streams responses, calls Auth0-permission-gated tools on your behalf</span>
+            <span class="muted" style="font-size:0.85rem;">{{ visible_tools|length }} tool{{ '' if visible_tools|length == 1 else 's' }} available for your role</span>
         </div>
-        <div style="display:flex; gap:0.5rem;">
-            <button type="button" id="clear-chat" class="btn btn-secondary btn-small">Clear chat</button>
-            <a href="/chat" class="btn btn-small">Open full assistant →</a>
-        </div>
+        <button type="button" id="clear-chat" class="btn btn-secondary btn-small">Clear chat</button>
     </div>
-    {% with compact = True %}
-        {% include "_chat_widget.html" %}
-    {% endwith %}
+    {% include "_chat_widget.html" %}
 </div>
-{% endif %}
 
 {% if ctx.role == 'compass_admin' %}
 
@@ -52,29 +45,17 @@
         <div class="kpi-value">{{ kpi.trips }}</div>
         <div class="kpi-meta">{{ kpi.trips_completed }} completed</div>
     </div>
-    <div class="kpi">
-        <div class="kpi-label">Total spend</div>
-        <div class="kpi-value">${{ '{:,.0f}'.format(kpi.total_spent) }}</div>
-        <div class="kpi-meta">across all organizations</div>
-    </div>
 </div>
 
 <div class="card">
     <h2>Organizations</h2>
     <table>
-        <thead><tr><th>Organization</th><th>Org slug</th><th>Budget</th><th>Spent</th><th></th></tr></thead>
+        <thead><tr><th>Organization</th><th>Org slug</th><th></th></tr></thead>
         <tbody>
         {% for c in companies %}
             <tr>
                 <td><a href="/companies/{{ c.id }}">{{ c.display_name }}</a></td>
                 <td><code>{{ c.org_name }}</code></td>
-                <td>{{ c.currency }} {{ '{:,.0f}'.format(c.budget) }}</td>
-                <td>{{ c.currency }} {{ '{:,.0f}'.format(c.spent) }}
-                    <div class="bar">
-                        {% set pct = (c.spent / c.budget * 100) if c.budget else 0 %}
-                        <div class="bar-fill {% if pct > 100 %}over{% elif pct > 80 %}warning{% endif %}" style="width: {{ [pct, 100]|min }}%"></div>
-                    </div>
-                </td>
                 <td><a class="btn btn-small btn-secondary" href="/companies/{{ c.id }}">View</a></td>
             </tr>
         {% endfor %}
@@ -83,33 +64,6 @@
 </div>
 
 {% elif ctx.role == 'travel_agent' %}
-
-{% if my_company %}
-<div class="card-grid">
-    <div class="kpi">
-        <div class="kpi-label">Your organization</div>
-        <div class="kpi-value" style="font-size:1.2rem">{{ my_company.display_name }}</div>
-        <div class="kpi-meta"><code>{{ my_company.org_name }}</code></div>
-    </div>
-    <div class="kpi">
-        <div class="kpi-label">Annual budget</div>
-        <div class="kpi-value">{{ my_company.currency }} {{ '{:,.0f}'.format(my_company.budget) }}</div>
-    </div>
-    <div class="kpi">
-        <div class="kpi-label">Spent</div>
-        {% set pct = (my_company.spent / my_company.budget * 100) if my_company.budget else 0 %}
-        <div class="kpi-value">{{ my_company.currency }} {{ '{:,.0f}'.format(my_company.spent) }}</div>
-        <div class="kpi-meta">{{ '%.1f' % pct }}% of budget</div>
-        <div class="bar">
-            <div class="bar-fill {% if pct > 100 %}over{% elif pct > 80 %}warning{% endif %}" style="width: {{ [pct, 100]|min }}%"></div>
-        </div>
-    </div>
-    <div class="kpi">
-        <div class="kpi-label">Customers under your org</div>
-        <div class="kpi-value">{{ kpi.customers }}</div>
-    </div>
-</div>
-{% endif %}
 
 {% if flash_success %}<div class="alert alert-success"><strong>Success:</strong> {{ flash_success }}</div>{% endif %}
 {% if flash_error %}<div class="alert alert-error"><strong>Error:</strong> {{ flash_error }}</div>{% endif %}
@@ -155,32 +109,6 @@
     </table>
     {% else %}
     <p class="muted">No pending requests right now.</p>
-    {% endif %}
-</div>
-
-<div class="card">
-    <h2>Recent bookings</h2>
-    {% if bookings %}
-    <table>
-        <thead><tr><th>Booking</th><th>Customer</th><th>Where</th><th>When</th><th>Cost</th><th>Status</th></tr></thead>
-        <tbody>
-        {% for b in bookings[:10] %}
-            <tr>
-                <td>
-                    {% if b.link %}<a href="{{ b.link }}"><code>{{ b.id }}</code></a>{% else %}<code>{{ b.id }}</code>{% endif %}
-                    · {{ b.type }}
-                </td>
-                <td>{{ customer_names.get(b.customer_id, b.customer_id) }}</td>
-                <td>{{ b.summary }}{% if b.location and b.kind == 'experience' %} <span class="muted">({{ b.location }})</span>{% endif %}</td>
-                <td>{{ b.date_label }}</td>
-                <td>{{ b.currency }} {{ '{:,.0f}'.format(b.cost) }}</td>
-                <td><span class="status-badge {{ b.status }}">{{ b.status }}</span></td>
-            </tr>
-        {% endfor %}
-        </tbody>
-    </table>
-    {% else %}
-    <p class="muted">No bookings yet. Use the AI assistant to book a trip or activity.</p>
     {% endif %}
 </div>
 

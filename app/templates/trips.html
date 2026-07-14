@@ -7,6 +7,14 @@
     <h1>Trips</h1>
     <span class="muted">{{ trips|length }} total{% if scope_label %} · {{ scope_label }}{% endif %}</span>
 </div>
+<div class="sub-nav">
+    {% set perms = ctx.permissions or [] %}
+    {% if 'read:all_customers' in perms or 'read:my_customers' in perms %}
+    <a href="/customers">Customers</a>
+    {% endif %}
+    <a href="/trips" class="active">Trips</a>
+    <a href="/documents">Documents</a>
+</div>
 
 <div class="card">
     {% if trips %}
