@@ -1262,14 +1262,16 @@ TOOLS: dict[str, dict] = {
             "function": {
                 "name": "request_trip",
                 "description": (
-                    "Submit a trip request that the customer's travel agent "
-                    "will approve or deny. Use this whenever a CUSTOMER says "
-                    "'book a flight', 'I'd like to book a trip', 'add this "
-                    "flight to my bookings', etc. Customers cannot book "
-                    "directly — request_trip creates a pending approval "
-                    "request that shows up on their agent's dashboard. Once "
-                    "the agent approves, the trip lands in the customer's "
-                    "/trips list."
+                    "Submit a trip request for agent approval. "
+                    "PRECONDITION — you MUST call search_flights first and "
+                    "show the customer the numbered results. Only call "
+                    "request_trip AFTER the customer has explicitly chosen "
+                    "one of the options from those results. Populate "
+                    "origin, destination, depart_date, return_date, and "
+                    "cost directly from the chosen search result — never "
+                    "invent or default these values. If you have not yet "
+                    "called search_flights in this conversation, do that "
+                    "first instead of calling this tool."
                 ),
                 "parameters": {
                     "type": "object",
