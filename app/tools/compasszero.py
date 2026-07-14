@@ -1066,7 +1066,17 @@ TOOLS: dict[str, dict] = {
             "type": "function",
             "function": {
                 "name": "book_trip",
-                "description": "Book a new trip (flight / hotel / train) for a customer. Agents can only book for customers in their own org; admins can book for anyone. Always confirm details with the user before calling.",
+                "description": (
+                    "Book a new flight/hotel/train for a customer. "
+                    "PRECONDITION — for flights, you MUST call search_flights "
+                    "first, present the numbered results to the user, and wait "
+                    "for them to choose one before calling this tool. Populate "
+                    "origin, destination, depart_date, and cost from the chosen "
+                    "result — never invent or default these values. For hotels "
+                    "and trains where no search tool exists, ask the user for "
+                    "the details before calling. Agents can only book for "
+                    "customers in their own org; admins can book for anyone."
+                ),
                 "parameters": {
                     "type": "object",
                     "properties": {
@@ -1116,13 +1126,14 @@ TOOLS: dict[str, dict] = {
             "function": {
                 "name": "book_experience",
                 "description": (
-                    "Attach an experience (tour / activity / dinner "
-                    "reservation) to an EXISTING trip. Use this when the "
-                    "user already has a flight/trip on file and wants to "
-                    "add an activity to it. For a standalone activity with "
-                    "no flight, use book_customer_experience instead. "
-                    "Agents can only book for trips owned by customers in "
-                    "their org."
+                    "Attach an experience to an EXISTING trip. "
+                    "PRECONDITION — call search_experiences first, present "
+                    "the numbered results, and wait for the user to choose "
+                    "one AND a specific time slot before calling this tool. "
+                    "Never auto-select an experience. Use for experiences "
+                    "that attach to a parent trip; for standalone experiences "
+                    "use book_customer_experience instead. Agents can only "
+                    "book for trips owned by customers in their own org."
                 ),
                 "parameters": {
                     "type": "object",
@@ -1146,16 +1157,13 @@ TOOLS: dict[str, dict] = {
             "function": {
                 "name": "book_customer_experience",
                 "description": (
-                    "Book a STANDALONE experience for a customer with NO "
-                    "flight/trip attached — e.g. a one-off cooking class, "
-                    "wine tasting, or day trip the agent wants to add for "
-                    "the customer without a parent trip. Use this whenever "
-                    "the user says 'book a cooking class for Jane', 'add "
-                    "a wine tasting for cu_xxx', etc., and there's no trip "
-                    "to attach it to. Agents can only book for customers "
-                    "in their own org. Triggers a CIBA push to the agent's "
-                    "enrolled device — they must approve before the "
-                    "booking is created."
+                    "Book a STANDALONE experience for a customer (no parent "
+                    "trip). PRECONDITION — call search_experiences first, "
+                    "present the numbered results, and wait for the user to "
+                    "choose one AND a specific time slot before calling this "
+                    "tool. Never auto-select an experience or time. Triggers "
+                    "a CIBA push — agent must approve on their enrolled "
+                    "device. Agents can only book for customers in their org."
                 ),
                 "parameters": {
                     "type": "object",
