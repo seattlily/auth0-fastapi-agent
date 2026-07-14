@@ -63,6 +63,15 @@
         {% endif %}
     {% endif %}
 
+    <div id="chat-ciba-banner" class="chat-ciba-banner" style="display:none;" role="status" aria-live="polite">
+        <div class="chat-ciba-banner-icon">📲</div>
+        <div class="chat-ciba-banner-body">
+            <strong>Approval required</strong>
+            <span id="chat-ciba-banner-elapsed"> — open <strong>Auth0 Guardian</strong> on your phone and tap Approve to continue.</span>
+        </div>
+        <div class="chat-ciba-banner-spinner" aria-hidden="true"></div>
+    </div>
+
     <form id="chat-form" method="post" action="/chat" class="chat-form">
         <input id="chat-input" type="text" name="message" placeholder="Ask about trips, customers, or book something..." autocomplete="off" required>
         <button type="submit" class="btn">Send</button>
@@ -104,7 +113,32 @@ document.querySelectorAll('.message.assistant .content').forEach((el) => {
     const clearBtn = document.getElementById('clear-chat');
     const logEntries = document.getElementById('agent-log-entries');
     const logCount = document.getElementById('agent-log-count');
+    const cibaBanner = document.getElementById('chat-ciba-banner');
+    const cibaBannerElapsed = document.getElementById('chat-ciba-banner-elapsed');
     let totalToolCalls = 0;
+    let cibaActiveIds = new Set();
+    let cibaTimerHandle = null;
+    let cibaStartTime = null;
+
+    function showCibaBanner() {
+        if (!cibaBanner) return;
+        if (cibaStartTime === null) cibaStartTime = Date.now();
+        cibaBanner.style.display = 'flex';
+        if (!cibaTimerHandle) {
+            cibaTimerHandle = setInterval(() => {
+                const s = Math.floor((Date.now() - cibaStartTime) / 1000);
+                if (cibaBannerElapsed) cibaBannerElapsed.innerHTML = ' — waiting ' + s + 's. Open <strong>Auth0 Guardian</strong> and tap Approve.';
+            }, 1000);
+        }
+    }
+
+    function hideCibaBanner() {
+        if (!cibaBanner) return;
+        cibaBanner.style.display = 'none';
+        if (cibaTimerHandle) { clearInterval(cibaTimerHandle); cibaTimerHandle = null; }
+        cibaStartTime = null;
+        if (cibaBannerElapsed) cibaBannerElapsed.innerHTML = ' — open <strong>Auth0 Guardian</strong> on your phone and tap Approve to continue.';
+    }
 
     document.querySelectorAll('.prompt-chip').forEach((chip) => {
         chip.addEventListener('click', () => {
@@ -171,8 +205,9 @@ document.querySelectorAll('.message.assistant .content').forEach((el) => {
             }
 
             const entry = document.createElement('div');
-            entry.className = 'agent-log-entry' + (reasoning ? ' agent-log-reasoning' : '');
+            entry.className = 'agent-log-entry' + (reasoning ? ' agent-log-reasoning' : '') + (ciba ? ' agent-log-ciba' : '');
             entry.dataset.tcid = id;
+            if (ciba) entry.dataset.ciba = '1';
 
             const nameEl = document.createElement('div');
             nameEl.className = 'agent-log-entry-name';
@@ -202,12 +237,17 @@ document.querySelectorAll('.message.assistant .content').forEach((el) => {
             statusEl.innerHTML = reasoning
                 ? '<span class="agent-log-spinner"></span> Planning…'
                 : (ciba
-                    ? '<span class="agent-log-spinner"></span> Waiting for push approval…'
+                    ? '<span class="agent-log-spinner agent-log-spinner-ciba"></span> Waiting for device approval…'
                     : '<span class="agent-log-spinner"></span> Running…');
             entry.appendChild(statusEl);
 
             logEntries.appendChild(entry);
             entry.scrollIntoView({ block: 'nearest' });
+
+            if (ciba) {
+                cibaActiveIds.add(id);
+                showCibaBanner();
+            }
         }
     }
 
@@ -220,6 +260,12 @@ document.querySelectorAll('.message.assistant .content').forEach((el) => {
         let text = ok ? '✓ ' + ms + 'ms' : '✗ failed';
         if (summary) text += ' — ' + summary;
         statusEl.textContent = text;
+        entry.classList.remove('agent-log-ciba');
+
+        if (entry.dataset.ciba) {
+            cibaActiveIds.delete(id);
+            if (cibaActiveIds.size === 0) hideCibaBanner();
+        }
     }
 
     form.addEventListener('submit', async (e) => {

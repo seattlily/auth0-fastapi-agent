@@ -651,6 +651,58 @@ table tbody tr:hover { background: var(--surface-alt); }
     animation: ciba-spin 0.75s linear infinite;
     flex-shrink: 0;
 }
+.agent-log-spinner-ciba {
+    width: 11px;
+    height: 11px;
+    border-width: 2px;
+    border-top-color: #f59e0b;
+}
+.agent-log-ciba {
+    border-left: 3px solid #f59e0b;
+    background: color-mix(in srgb, #f59e0b 8%, var(--surface-alt));
+    animation: ciba-pulse 2s ease-in-out infinite;
+}
+.agent-log-ciba .agent-log-entry-status { color: #b45309; font-weight: 600; }
+[data-theme="dark"] .agent-log-ciba { background: color-mix(in srgb, #f59e0b 12%, var(--surface-alt)); }
+[data-theme="dark"] .agent-log-ciba .agent-log-entry-status { color: #fbbf24; }
+@keyframes ciba-pulse {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(245, 158, 11, 0); }
+    50% { box-shadow: 0 0 0 4px rgba(245, 158, 11, 0.18); }
+}
+
+/* ---------- chat CIBA approval banner ---------- */
+.chat-ciba-banner {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    margin: 0.5rem 0 0.25rem;
+    padding: 0.85rem 1rem;
+    border-radius: var(--radius);
+    background: color-mix(in srgb, #f59e0b 12%, var(--surface));
+    border: 1.5px solid #f59e0b;
+    animation: ciba-pulse 2s ease-in-out infinite;
+}
+[data-theme="dark"] .chat-ciba-banner {
+    background: color-mix(in srgb, #f59e0b 15%, var(--surface));
+}
+.chat-ciba-banner-icon { font-size: 1.6rem; line-height: 1; flex-shrink: 0; }
+.chat-ciba-banner-body {
+    flex: 1;
+    font-size: 0.88rem;
+    line-height: 1.45;
+    color: var(--text);
+}
+.chat-ciba-banner-body strong:first-child { color: #b45309; }
+[data-theme="dark"] .chat-ciba-banner-body strong:first-child { color: #fbbf24; }
+.chat-ciba-banner-spinner {
+    width: 20px;
+    height: 20px;
+    flex-shrink: 0;
+    border-radius: 50%;
+    border: 2.5px solid rgba(245, 158, 11, 0.3);
+    border-top-color: #f59e0b;
+    animation: ciba-spin 0.8s linear infinite;
+}
 
 @media (max-width: 960px) {
     .chat-layout {
