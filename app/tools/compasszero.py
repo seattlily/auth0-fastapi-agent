@@ -23,6 +23,7 @@ from mock_data import (
     add_experience,
     add_travel_agent,
     add_trip,
+    get_agents,
     get_approval_requests,
     get_companies,
     get_company,
@@ -76,6 +77,13 @@ async def list_all_customers(args: dict, ctx: dict) -> str:
 async def list_companies(args: dict, ctx: dict) -> str:
     require(ctx, "read:all_companies")
     return json.dumps(get_companies())
+
+
+async def list_travel_agents(args: dict, ctx: dict) -> str:
+    require_any(ctx, "manage:agents", "manage:companies")
+    org_name = args.get("org_name") or ctx.get("org_name")
+    agents = get_agents(org_name=org_name) if org_name else get_agents()
+    return json.dumps(agents)
 
 
 async def list_pending_requests(args: dict, ctx: dict) -> str:
@@ -867,6 +875,29 @@ TOOLS: dict[str, dict] = {
                 "name": "list_companies",
                 "description": "List every Compass0 organization with budget vs. spent. Admin-only.",
                 "parameters": {"type": "object", "properties": {}},
+            },
+        },
+    },
+    "list_travel_agents": {
+        "required_scopes": ("manage:companies",),
+        "fn": list_travel_agents,
+        "schema": {
+            "type": "function",
+            "function": {
+                "name": "list_travel_agents",
+                "description": (
+                    "List travel agents. Admin sees all agents across every "
+                    "organization; pass org_name to filter to one org."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "org_name": {
+                            "type": "string",
+                            "description": "Filter to a specific org slug. Omit to list all agents.",
+                        }
+                    },
+                },
             },
         },
     },
