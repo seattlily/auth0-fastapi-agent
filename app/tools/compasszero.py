@@ -787,19 +787,74 @@ async def request_experience(args: dict, ctx: dict) -> str:
 
 
 async def create_my_customer(args: dict, ctx: dict) -> str:
+    """Travel-agent: create a local customer record AND a real Auth0 user,
+    then add that user to the agent's organization with the customer role."""
     require(ctx, "book:trips")
+    from .auth0_management import (
+        ManagementError,
+        add_organization_member,
+        assign_organization_member_roles,
+        create_database_user,
+        get_organization_by_name,
+        get_role_id,
+    )
+
     org_name = ctx.get("org_name")
     if not org_name:
         return json.dumps(
             {"error": "no org_name on your token — log in via your travel agency's organization"}
         )
+
+    name = (args.get("name") or "").strip()
+    email = (args.get("email") or "").strip()
+    if not (name and email):
+        return json.dumps({"error": "name and email are required."})
+
+    try:
+        org = await get_organization_by_name(org_name)
+    except ManagementError as e:
+        return json.dumps({"error": str(e)})
+    if not org:
+        return json.dumps(
+            {"error": f"no Auth0 organization named '{org_name}' — contact your admin."}
+        )
+
+    try:
+        role_id = await get_role_id("customer")
+    except ManagementError as e:
+        return json.dumps({"error": str(e)})
+
+    try:
+        auth0_user = await create_database_user(email=email, name=name)
+        await add_organization_member(org["id"], auth0_user["user_id"])
+        if role_id:
+            await assign_organization_member_roles(
+                org["id"], auth0_user["user_id"], [role_id]
+            )
+    except ManagementError as e:
+        return json.dumps({"error": str(e)})
+
     customer = add_customer(
-        name=args["name"],
-        email=args["email"],
+        name=name,
+        email=email,
         org_name=org_name,
         agent_id=ctx.get("agent_id"),
     )
-    return json.dumps({"ok": True, "customer": customer})
+    customer["auth0_user_id"] = auth0_user.get("user_id")
+    return json.dumps(
+        {
+            "ok": True,
+            "customer": customer,
+            "auth0_user": {
+                "user_id": auth0_user.get("user_id"),
+                "email": auth0_user.get("email"),
+            },
+            "note": (
+                "Auth0 user created. They will need a password reset "
+                "before they can log in."
+            ),
+        }
+    )
 
 
 # ---------- tool registry ----------
