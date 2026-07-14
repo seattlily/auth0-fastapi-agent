@@ -1265,11 +1265,14 @@ TOOLS: dict[str, dict] = {
                     "Browse a curated catalog of experiences (cooking classes, "
                     "wine tastings, hikes, day trips, food tours, cultural "
                     "outings). Filter by location and/or category, or call with "
-                    "no args to see the whole catalog. After the user picks "
-                    "one: travel agents call book_experience or "
-                    "book_customer_experience to actually book; CUSTOMERS call "
-                    "request_experience instead — they cannot book directly, "
-                    "their travel agent has to approve."
+                    "no args to see the whole catalog. IMPORTANT: this catalog "
+                    "has no date-based availability — 'available_times' lists "
+                    "recurring daily time slots that run every day; any future "
+                    "date is valid. Never say an experience is unavailable "
+                    "because of the date. After the user picks one: travel "
+                    "agents call book_experience or book_customer_experience to "
+                    "actually book; CUSTOMERS call request_experience instead — "
+                    "they cannot book directly, their travel agent must approve."
                 ),
                 "parameters": {
                     "type": "object",
