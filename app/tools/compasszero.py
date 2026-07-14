@@ -298,6 +298,10 @@ _EXPERIENCE_CATALOG: list[dict] = [
     {"id": "exc_010", "name": "Marrakech medina & souks tour",            "category": "cultural",      "location": "Marrakech",     "country": "Morocco",       "duration": "4h",  "price": 75,  "currency": "USD", "description": "Walking tour of the medina with a local guide; mint tea at a riad to finish.",               "available_times": ["09:00", "14:00"]},
     {"id": "exc_011", "name": "Iceland glacier hike on Sólheimajökull",   "category": "hike",          "location": "Sólheimajökull","country": "Iceland",       "duration": "5h",  "price": 195, "currency": "USD", "description": "Guided ice-axe hike with crampons and helmets provided; transfer from Reykjavík available.",  "available_times": ["08:00", "11:00"]},
     {"id": "exc_012", "name": "West End theatre night, London",           "category": "cultural",      "location": "London",        "country": "United Kingdom","duration": "3h",  "price": 140, "currency": "USD", "description": "Premium-stalls ticket to a current West End show plus pre-theatre dinner reservation.",      "available_times": ["14:00", "19:30"]},
+    {"id": "exc_013", "name": "Berlin street art & Mitte walking tour",   "category": "cultural",      "location": "Berlin",        "country": "Germany",       "duration": "3h",  "price": 65,  "currency": "USD", "description": "Expert-led walk through Kreuzberg and Mitte murals, with a stop at the East Side Gallery.", "available_times": ["10:00", "14:00", "17:00"]},
+    {"id": "exc_014", "name": "Berlin food market & brewery tour",        "category": "food_tour",     "location": "Berlin",        "country": "Germany",       "duration": "4h",  "price": 90,  "currency": "USD", "description": "Markthalle Neun street food stops paired with tastings at two Berlin craft breweries.",       "available_times": ["11:00", "15:00"]},
+    {"id": "exc_015", "name": "New York City skyline helicopter flight",  "category": "day_trip",      "location": "New York",      "country": "USA",           "duration": "1h",  "price": 295, "currency": "USD", "description": "15-minute doors-off helicopter loop over Manhattan, Hudson, and the Statue of Liberty.",     "available_times": ["09:00", "11:00", "13:00", "15:00"]},
+    {"id": "exc_016", "name": "Sydney Harbour sailing & snorkelling",     "category": "day_trip",      "location": "Sydney",        "country": "Australia",     "duration": "5h",  "price": 175, "currency": "USD", "description": "Half-day on a classic wooden ketch — morning snorkelling off Manly, harbour sailing back.",   "available_times": ["08:30", "13:30"]},
 ]
 
 _EXPERIENCE_CATEGORIES = sorted({e["category"] for e in _EXPERIENCE_CATALOG})
@@ -309,17 +313,28 @@ async def search_experiences(args: dict, ctx: dict) -> str:
     category = (args.get("category") or "").strip().lower()
 
     out = _EXPERIENCE_CATALOG
+    location_matched = True
     if location:
-        out = [e for e in out if location in e["location"].lower() or location in e["country"].lower()]
+        filtered = [e for e in out if location in e["location"].lower() or location in e["country"].lower()]
+        if filtered:
+            out = filtered
+        else:
+            # No exact match — return full catalog so the agent can present
+            # all available options rather than reporting zero results.
+            location_matched = False
     if category:
         out = [e for e in out if e["category"] == category]
-    return json.dumps(
-        {
-            "categories": _EXPERIENCE_CATEGORIES,
-            "match_count": len(out),
-            "experiences": out,
-        }
-    )
+    result: dict = {
+        "categories": _EXPERIENCE_CATEGORIES,
+        "match_count": len(out),
+        "experiences": out,
+    }
+    if location and not location_matched:
+        result["location_note"] = (
+            f"No experiences found specifically in '{args.get('location')}'. "
+            "Showing all available experiences instead."
+        )
+    return json.dumps(result)
 
 
 # ---------- trip drill-down ----------
