@@ -214,7 +214,24 @@ document.querySelectorAll('.message.assistant .content').forEach((el) => {
         return s.length > 40 ? s.slice(0, 40) + '…' : s;
     }
 
-    function addLogEntry(id, name, args, ciba, reasoning) {
+    function principalLabel(p) {
+        if (!p) return null;
+        const parts = [];
+        if (p.agent_id) {
+            parts.push('🤖 ' + p.agent_id);
+        } else {
+            parts.push('⚙️ app');
+        }
+        if (p.user_name || p.user_sub) {
+            let user = '👤 ' + (p.user_name || p.user_sub);
+            if (p.user_role) user += ' (' + p.user_role + ')';
+            if (p.org_name) user += ' · ' + p.org_name;
+            parts.push(user);
+        }
+        return parts.join(' → ');
+    }
+
+    function addLogEntry(id, name, args, ciba, reasoning, principal) {
         if (logEntries) {
             const empty = document.getElementById('agent-log-empty');
             if (empty) empty.remove();
@@ -234,6 +251,14 @@ document.querySelectorAll('.message.assistant .content').forEach((el) => {
             nameEl.className = 'agent-log-entry-name';
             nameEl.textContent = reasoning ? '💭 Reasoning' : name;
             entry.appendChild(nameEl);
+
+            const label = principalLabel(principal);
+            if (label) {
+                const principalEl = document.createElement('div');
+                principalEl.className = 'agent-log-entry-principal';
+                principalEl.textContent = label;
+                entry.appendChild(principalEl);
+            }
 
             if (reasoning) {
                 const text = (args && args.reasoning) ? args.reasoning : '';
@@ -334,7 +359,7 @@ document.querySelectorAll('.message.assistant .content').forEach((el) => {
                             assistantContent.innerHTML = renderMarkdown(textContent);
                             messages.scrollTop = messages.scrollHeight;
                         } else if (msg.t === 'tool_call') {
-                            addLogEntry(msg.id, msg.name, msg.args, msg.ciba, msg.reasoning);
+                            addLogEntry(msg.id, msg.name, msg.args, msg.ciba, msg.reasoning, msg.principal);
                         } else if (msg.t === 'tool_result') {
                             updateLogEntry(msg.id, msg.ok, msg.ms, msg.summary);
                         }

@@ -630,6 +630,15 @@ table tbody tr:hover { background: var(--surface-alt); }
     font-weight: 600;
     color: var(--text);
 }
+.agent-log-entry-principal {
+    font-size: 0.68rem;
+    color: var(--brand);
+    margin-top: 0.15rem;
+    font-weight: 500;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
 .agent-log-entry-args {
     font-family: var(--mono);
     font-size: 0.72rem;

@@ -451,6 +451,11 @@ openai_client = AsyncOpenAI(
 )
 LLM_MODEL = os.environ.get("LLM_MODEL", "gpt-4o-mini")
 
+# Auth0 agent identity registered for this AI assistant.
+# Set AUTH0_AGENT_ID in .env to enable principal attribution in the
+# agent activity log. If unset, tool calls are attributed to "app".
+AUTH0_AGENT_ID: str | None = os.environ.get("AUTH0_AGENT_ID")
+
 
 # ---------- documents ----------
 
@@ -1497,6 +1502,13 @@ async def chat_stream(request: Request, response: Response):
                         "args": args,
                         "ciba": name in CIBA_GATED_CHAT_TOOLS,
                         "reasoning": name == "think",
+                        "principal": {
+                            "agent_id": AUTH0_AGENT_ID,
+                            "user_sub": ctx.get("sub"),
+                            "user_name": (user or {}).get("name"),
+                            "user_role": ctx.get("role"),
+                            "org_name": ctx.get("org_name"),
+                        },
                     }) + "\n\n"
 
                     start_t = time.monotonic()
