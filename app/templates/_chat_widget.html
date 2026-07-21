@@ -154,15 +154,15 @@ document.querySelectorAll('.message.assistant .content').forEach((el) => {
             if (e.t === 'user_turn') {
                 addUserTurnEntry(e);
             } else if (e.t === 'agent_call') {
-                addLogEntry(e.id, '', {}, false, false, null, 'agent');
+                addAgentEntry(e);
             } else if (e.t === 'agent_done') {
-                updateLogEntry(e.id, true, null, 'done');
+                updateAgentDone(e.id, e.ms);
             } else if (e.t === 'llm_call') {
-                addLogEntry(e.id, '', {}, false, false, null, 'llm');
+                onLlmCall(e.agent_id);
             } else if (e.t === 'llm_done') {
-                updateLogEntry(e.id, true, e.ms, e.has_tools ? 'called tools' : 'responded');
+                onLlmDone(e.agent_id, e.ms);
             } else if (e.t === 'tool_call') {
-                addLogEntry(e.id, e.name, e.args, e.ciba, e.reasoning, e.principal, e.layer);
+                addLogEntry(e.id, e.name, e.args, e.ciba, e.reasoning, e.layer);
             } else if (e.t === 'tool_result') {
                 updateLogEntry(e.id, e.ok, e.ms, e.summary);
             }
@@ -400,7 +400,6 @@ document.querySelectorAll('.message.assistant .content').forEach((el) => {
 
     const LAYER_META = {
         agent:  { icon: '🤖', label: 'AI Agent',    cls: 'agent-log-layer-agent'  },
-        llm:    { icon: '🧠', label: 'LLM',         cls: 'agent-log-layer-llm'    },
         google: { icon: '🔗', label: 'Token Vault',  cls: 'agent-log-layer-google' },
         app:    { icon: '⚙️', label: 'App',          cls: 'agent-log-layer-app'    },
     };
@@ -434,99 +433,155 @@ document.querySelectorAll('.message.assistant .content').forEach((el) => {
         if (!restoring) entry.scrollIntoView({ block: 'nearest' });
     }
 
-    function addLogEntry(id, name, args, ciba, reasoning, principal, layer) {
-        if (logEntries) {
-            const empty = document.getElementById('agent-log-empty');
-            if (empty) empty.remove();
+    // Track LLM accumulation per agent turn
+    const _agentLlmState = {};  // agentId → {calls, totalMs}
 
-            totalToolCalls++;
-            if (logCount) {
-                logCount.textContent = totalToolCalls;
-                logCount.style.display = '';
+    function addAgentEntry(msg) {
+        if (!logEntries) return;
+        const empty = document.getElementById('agent-log-empty');
+        if (empty) empty.remove();
+
+        totalToolCalls++;
+        if (logCount) { logCount.textContent = totalToolCalls; logCount.style.display = ''; }
+
+        _agentLlmState[msg.id] = { calls: 0, totalMs: 0 };
+
+        const entry = document.createElement('div');
+        entry.className = 'agent-log-entry agent-log-layer-agent';
+        entry.dataset.tcid = msg.id;
+
+        const nameRow = document.createElement('div');
+        nameRow.className = 'agent-log-entry-name-row';
+
+        const badge = document.createElement('span');
+        badge.className = 'agent-log-layer-badge';
+        let badgeText = '🤖 AI Agent';
+        if (msg.agent_id) badgeText += ' · ' + msg.agent_id;
+        badge.textContent = badgeText;
+        nameRow.appendChild(badge);
+        entry.appendChild(nameRow);
+
+        // Principal: who triggered this
+        if (msg.user_name || msg.user_role) {
+            const principalEl = document.createElement('div');
+            principalEl.className = 'agent-log-entry-principal';
+            let ptext = '👤 ';
+            if (msg.user_name) ptext += msg.user_name;
+            if (msg.user_role) ptext += ' (' + msg.user_role + ')';
+            if (msg.org_name)  ptext += ' · ' + msg.org_name;
+            principalEl.textContent = ptext;
+            entry.appendChild(principalEl);
+        }
+
+        // LLM context placeholder (updated as LLM calls come in)
+        const llmCtx = document.createElement('div');
+        llmCtx.className = 'agent-log-llm-context';
+        llmCtx.dataset.agentId = msg.id;
+        entry.appendChild(llmCtx);
+
+        const statusEl = document.createElement('div');
+        statusEl.className = 'agent-log-entry-status agent-log-pending';
+        statusEl.innerHTML = '<span class="agent-log-spinner"></span> Processing…';
+        entry.appendChild(statusEl);
+
+        logEntries.appendChild(entry);
+        if (!restoring) entry.scrollIntoView({ block: 'nearest' });
+    }
+
+    function onLlmCall(agentId) {
+        if (!logEntries || !agentId) return;
+        const state = _agentLlmState[agentId] || { calls: 0, totalMs: 0 };
+        state.calls++;
+        _agentLlmState[agentId] = state;
+        const ctx = logEntries.querySelector('[data-agent-id="' + agentId + '"].agent-log-llm-context');
+        if (ctx) {
+            ctx.innerHTML = '<span class="agent-log-spinner" style="width:8px;height:8px;margin-right:4px;"></span>LLM call ' + state.calls + '…';
+        }
+    }
+
+    function onLlmDone(agentId, ms) {
+        if (!logEntries || !agentId) return;
+        const state = _agentLlmState[agentId] || { calls: 0, totalMs: 0 };
+        state.totalMs += ms;
+        _agentLlmState[agentId] = state;
+        const ctx = logEntries.querySelector('[data-agent-id="' + agentId + '"].agent-log-llm-context');
+        if (ctx) {
+            const callLabel = state.calls === 1 ? '1 LLM call' : state.calls + ' LLM calls';
+            ctx.textContent = '🧠 ' + callLabel + ' · ' + state.totalMs + 'ms';
+        }
+    }
+
+    function addLogEntry(id, name, args, ciba, reasoning, layer) {
+        if (!logEntries) return;
+        const empty = document.getElementById('agent-log-empty');
+        if (empty) empty.remove();
+
+        totalToolCalls++;
+        if (logCount) { logCount.textContent = totalToolCalls; logCount.style.display = ''; }
+
+        const meta = LAYER_META[layer] || LAYER_META.app;
+        const entry = document.createElement('div');
+        entry.className = [
+            'agent-log-entry',
+            meta.cls,
+            reasoning ? 'agent-log-reasoning' : '',
+            ciba      ? 'agent-log-ciba'      : '',
+        ].filter(Boolean).join(' ');
+        entry.dataset.tcid = id;
+        if (ciba) entry.dataset.ciba = '1';
+
+        const nameRow = document.createElement('div');
+        nameRow.className = 'agent-log-entry-name-row';
+
+        const badge = document.createElement('span');
+        badge.className = 'agent-log-layer-badge';
+        badge.textContent = meta.icon + ' ' + meta.label;
+        nameRow.appendChild(badge);
+
+        const displayName = reasoning ? 'Reasoning' : name;
+        if (displayName) {
+            const nameEl = document.createElement('span');
+            nameEl.className = 'agent-log-entry-name';
+            nameEl.textContent = displayName;
+            nameRow.appendChild(nameEl);
+        }
+        entry.appendChild(nameRow);
+
+        if (reasoning) {
+            const text = (args && args.reasoning) ? args.reasoning : '';
+            if (text) {
+                const reasonEl = document.createElement('div');
+                reasonEl.className = 'agent-log-entry-args';
+                reasonEl.textContent = text.length > 220 ? text.slice(0, 220) + '…' : text;
+                entry.appendChild(reasonEl);
             }
-
-            const meta = LAYER_META[layer] || LAYER_META.app;
-            const entry = document.createElement('div');
-            entry.className = [
-                'agent-log-entry',
-                meta.cls,
-                reasoning ? 'agent-log-reasoning' : '',
-                ciba      ? 'agent-log-ciba'      : '',
-            ].filter(Boolean).join(' ');
-            entry.dataset.tcid = id;
-            if (ciba) entry.dataset.ciba = '1';
-
-            // Layer badge + tool name row
-            const nameRow = document.createElement('div');
-            nameRow.className = 'agent-log-entry-name-row';
-
-            const badge = document.createElement('span');
-            badge.className = 'agent-log-layer-badge';
-            badge.textContent = meta.icon + ' ' + meta.label;
-            nameRow.appendChild(badge);
-
-            const displayName = reasoning ? 'Reasoning' : name;
-            if (displayName) {
-                const nameEl = document.createElement('span');
-                nameEl.className = 'agent-log-entry-name';
-                nameEl.textContent = displayName;
-                nameRow.appendChild(nameEl);
+        } else {
+            const pairs = Object.entries(args || {});
+            if (pairs.length) {
+                const argsEl = document.createElement('div');
+                argsEl.className = 'agent-log-entry-args';
+                argsEl.textContent = pairs.map(([k, v]) => k + ': ' + shortVal(v)).join('  ·  ');
+                entry.appendChild(argsEl);
             }
-            entry.appendChild(nameRow);
+        }
 
-            // Principal: agent acting on behalf of user
-            if (principal && !reasoning) {
-                const principalEl = document.createElement('div');
-                principalEl.className = 'agent-log-entry-principal';
-                let text = '';
-                if (principal.agent_id) {
-                    text += principal.agent_id;
-                }
-                if (principal.user_name || principal.user_sub) {
-                    const u = principal.user_name || principal.user_sub;
-                    text += (text ? ' → ' : '') + '👤 ' + u;
-                    if (principal.user_role) text += ' (' + principal.user_role + ')';
-                }
-                if (text) principalEl.textContent = text;
-                if (text) entry.appendChild(principalEl);
-            }
+        const statusEl = document.createElement('div');
+        statusEl.className = 'agent-log-entry-status agent-log-pending';
+        statusEl.innerHTML = reasoning
+            ? '<span class="agent-log-spinner"></span> Planning…'
+            : (ciba
+                ? '<span class="agent-log-spinner agent-log-spinner-ciba"></span> Waiting for device approval…'
+                : '<span class="agent-log-spinner"></span> Running…');
+        entry.appendChild(statusEl);
 
-            if (reasoning) {
-                const text = (args && args.reasoning) ? args.reasoning : '';
-                if (text) {
-                    const reasonEl = document.createElement('div');
-                    reasonEl.className = 'agent-log-entry-args';
-                    reasonEl.textContent = text.length > 220 ? text.slice(0, 220) + '…' : text;
-                    entry.appendChild(reasonEl);
-                }
-            } else {
-                const pairs = Object.entries(args || {});
-                if (pairs.length) {
-                    const argsEl = document.createElement('div');
-                    argsEl.className = 'agent-log-entry-args';
-                    argsEl.textContent = pairs.map(([k, v]) => k + ': ' + shortVal(v)).join('  ·  ');
-                    entry.appendChild(argsEl);
-                }
-            }
+        logEntries.appendChild(entry);
+        if (!restoring) entry.scrollIntoView({ block: 'nearest' });
 
-            const statusEl = document.createElement('div');
-            statusEl.className = 'agent-log-entry-status agent-log-pending';
-            statusEl.innerHTML = reasoning
-                ? '<span class="agent-log-spinner"></span> Planning…'
-                : (ciba
-                    ? '<span class="agent-log-spinner agent-log-spinner-ciba"></span> Waiting for device approval…'
-                    : layer === 'llm'
-                        ? '<span class="agent-log-spinner"></span> Generating…'
-                        : '<span class="agent-log-spinner"></span> Running…');
-            entry.appendChild(statusEl);
-
-            logEntries.appendChild(entry);
-            if (!restoring) entry.scrollIntoView({ block: 'nearest' });
-
-            if (ciba) {
-                cibaActiveIds.add(id);
-                showCibaBanner();
-            }
+        if (ciba) {
+            cibaActiveIds.add(id);
+            showCibaBanner();
+            // Also show CIBA status in the chat messages area
+            if (!restoring) showCibaChatMessage(id, name);
         }
     }
 
@@ -535,8 +590,10 @@ document.querySelectorAll('.message.assistant .content').forEach((el) => {
         const entry = logEntries.querySelector('[data-tcid="' + id + '"]');
         if (!entry) return;
         const statusEl = entry.querySelector('.agent-log-entry-status');
+        if (!statusEl) return;
         statusEl.className = 'agent-log-entry-status ' + (ok ? 'agent-log-done' : 'agent-log-error');
-        let text = ok ? '✓ ' + ms + 'ms' : '✗ failed';
+        let text = ok ? '✓' : '✗ failed';
+        if (ms != null) text += ' ' + ms + 'ms';
         if (summary) text += ' — ' + summary;
         statusEl.textContent = text;
         entry.classList.remove('agent-log-ciba');
@@ -544,7 +601,42 @@ document.querySelectorAll('.message.assistant .content').forEach((el) => {
         if (entry.dataset.ciba) {
             cibaActiveIds.delete(id);
             if (cibaActiveIds.size === 0) hideCibaBanner();
+            resolveCibaChatMessage(id, ok);
         }
+    }
+
+    function updateAgentDone(id, ms) {
+        if (!logEntries) return;
+        const entry = logEntries.querySelector('[data-tcid="' + id + '"]');
+        if (!entry) return;
+        const statusEl = entry.querySelector('.agent-log-entry-status');
+        if (!statusEl) return;
+        statusEl.className = 'agent-log-entry-status agent-log-done';
+        statusEl.textContent = '✓ ' + ms + 'ms';
+    }
+
+    // CIBA inline chat message
+    function showCibaChatMessage(toolId, toolName) {
+        if (!messages) return;
+        const div = document.createElement('div');
+        div.className = 'message ciba-status-msg';
+        div.dataset.cibaFor = toolId;
+        div.innerHTML =
+            '<span class="ciba-status-spinner"></span>' +
+            '<span>📲 <strong>Device approval required</strong> — open <strong>Auth0 Guardian</strong> and tap Approve to continue.</span>';
+        messages.appendChild(div);
+        messages.scrollTop = messages.scrollHeight;
+    }
+
+    function resolveCibaChatMessage(toolId, ok) {
+        if (!messages) return;
+        const div = messages.querySelector('[data-ciba-for="' + toolId + '"]');
+        if (!div) return;
+        div.innerHTML = ok
+            ? '✅ <strong>Approved</strong> — continuing…'
+            : '❌ <strong>Approval denied or timed out.</strong>';
+        div.classList.add(ok ? 'ciba-status-resolved' : 'ciba-status-denied');
+        setTimeout(() => { if (div.parentNode) div.remove(); }, 4000);
     }
 
     form.addEventListener('submit', async (e) => {
@@ -595,9 +687,25 @@ document.querySelectorAll('.message.assistant .content').forEach((el) => {
                             textContent += msg.v;
                             assistantContent.innerHTML = renderMarkdown(textContent);
                             messages.scrollTop = messages.scrollHeight;
+                        } else if (msg.t === 'agent_call') {
+                            addAgentEntry(msg);
+                            logEvents.push({t: 'agent_call', id: msg.id, agent_id: msg.agent_id, user_name: msg.user_name, user_role: msg.user_role, org_name: msg.org_name});
+                            saveLogEvents();
+                        } else if (msg.t === 'agent_done') {
+                            updateAgentDone(msg.id, msg.ms);
+                            logEvents.push({t: 'agent_done', id: msg.id, ms: msg.ms});
+                            saveLogEvents();
+                        } else if (msg.t === 'llm_call') {
+                            onLlmCall(msg.agent_id);
+                            logEvents.push({t: 'llm_call', id: msg.id, agent_id: msg.agent_id});
+                            saveLogEvents();
+                        } else if (msg.t === 'llm_done') {
+                            onLlmDone(msg.agent_id, msg.ms);
+                            logEvents.push({t: 'llm_done', id: msg.id, agent_id: msg.agent_id, ms: msg.ms, has_tools: msg.has_tools});
+                            saveLogEvents();
                         } else if (msg.t === 'tool_call') {
-                            addLogEntry(msg.id, msg.name, msg.args, msg.ciba, msg.reasoning, msg.principal, msg.layer);
-                            logEvents.push({t: 'tool_call', id: msg.id, name: msg.name, args: msg.args, ciba: msg.ciba, reasoning: msg.reasoning, principal: msg.principal, layer: msg.layer});
+                            addLogEntry(msg.id, msg.name, msg.args, msg.ciba, msg.reasoning, msg.layer);
+                            logEvents.push({t: 'tool_call', id: msg.id, name: msg.name, args: msg.args, ciba: msg.ciba, reasoning: msg.reasoning, layer: msg.layer});
                             saveLogEvents();
                         } else if (msg.t === 'tool_result') {
                             updateLogEntry(msg.id, msg.ok, msg.ms, msg.summary);
@@ -605,22 +713,6 @@ document.querySelectorAll('.message.assistant .content').forEach((el) => {
                             saveLogEvents();
                         } else if (msg.t === 'search_cards') {
                             renderSearchCards(msg.kind, msg.data);
-                        } else if (msg.t === 'agent_call') {
-                            addLogEntry(msg.id, '', {}, false, false, null, 'agent');
-                            logEvents.push({t: 'agent_call', id: msg.id});
-                            saveLogEvents();
-                        } else if (msg.t === 'agent_done') {
-                            updateLogEntry(msg.id, true, null, 'done');
-                            logEvents.push({t: 'agent_done', id: msg.id});
-                            saveLogEvents();
-                        } else if (msg.t === 'llm_call') {
-                            addLogEntry(msg.id, '', {}, false, false, null, 'llm');
-                            logEvents.push({t: 'llm_call', id: msg.id});
-                            saveLogEvents();
-                        } else if (msg.t === 'llm_done') {
-                            updateLogEntry(msg.id, true, msg.ms, msg.has_tools ? 'called tools' : 'responded');
-                            logEvents.push({t: 'llm_done', id: msg.id, ms: msg.ms, has_tools: msg.has_tools});
-                            saveLogEvents();
                         }
                     }
                 }

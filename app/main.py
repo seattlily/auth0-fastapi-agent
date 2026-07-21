@@ -1508,15 +1508,25 @@ async def chat_stream(request: Request, response: Response):
             "org_name": ctx.get("org_name"),
         }) + "\n\n"
 
-        _AGENT_ID = "agent_orch"
-        yield "data: " + json.dumps({"t": "agent_call", "id": _AGENT_ID}) + "\n\n"
+        _turn = int(time.time() * 1000)
+        _agent_start = time.monotonic()
+        _AGENT_ID = f"agent_{_turn}"
+        yield "data: " + json.dumps({
+            "t": "agent_call",
+            "id": _AGENT_ID,
+            "agent_id": AUTH0_AGENT_ID,
+            "user_name": (user or {}).get("name"),
+            "user_role": ctx.get("role"),
+            "org_name": ctx.get("org_name"),
+        }) + "\n\n"
 
         try:
             for _iter in range(MAX_TOOL_ITERATIONS):
-                llm_call_id = f"llm_{_iter}"
+                llm_call_id = f"llm_{_turn}_{_iter}"
                 yield "data: " + json.dumps({
                     "t": "llm_call",
                     "id": llm_call_id,
+                    "agent_id": _AGENT_ID,
                     "model": LLM_MODEL,
                 }) + "\n\n"
 
@@ -1552,6 +1562,7 @@ async def chat_stream(request: Request, response: Response):
                 yield "data: " + json.dumps({
                     "t": "llm_done",
                     "id": llm_call_id,
+                    "agent_id": _AGENT_ID,
                     "ms": llm_ms,
                     "has_tools": bool(tool_calls_acc),
                 }) + "\n\n"
@@ -1646,7 +1657,8 @@ async def chat_stream(request: Request, response: Response):
             print(f"OpenAI API error: {type(e).__name__}: {e}")
             yield "data: " + json.dumps({"t": "chunk", "v": f"\n\nError: {type(e).__name__}: {e}"}) + "\n\n"
         finally:
-            yield "data: " + json.dumps({"t": "agent_done", "id": _AGENT_ID}) + "\n\n"
+            _agent_ms = int((time.monotonic() - _agent_start) * 1000)
+            yield "data: " + json.dumps({"t": "agent_done", "id": _AGENT_ID, "ms": _agent_ms}) + "\n\n"
 
     return StreamingResponse(
         generate(),
