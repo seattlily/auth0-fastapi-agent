@@ -73,10 +73,17 @@ def get_user_context(access_token_claims: dict | None, id_token_claims: dict | N
                 "customer": {"read:my_trips", "read:my_company"},
             }
             perms = perms | _role_perms.get(role, set())
+        elif it.get("sub") or at.get("sub"):
+            # Authenticated user with no org and no role assignment →
+            # self-service: can book directly for themselves only.
+            role = "self_service"
+            perms = perms | {"book:own_trips", "book:own_experiences", "read:my_trips"}
     return {
         "permissions": perms,
         "role": role,
         "sub": it.get("sub") or at.get("sub"),
+        "email": it.get("email") or at.get("email"),
+        "name": it.get("name") or at.get("name"),
         "org_id": at.get("org_id") or it.get("org_id"),
         "org_name": (
             at.get("org_name")
@@ -98,6 +105,8 @@ def role_for(permissions: set[str]) -> str:
         return "compass_admin"
     if "book:trips" in permissions:
         return "travel_agent"
+    if "book:own_trips" in permissions:
+        return "self_service"
     if "read:my_trips" in permissions:
         return "customer"
     return "unknown"

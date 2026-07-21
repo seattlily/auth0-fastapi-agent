@@ -26,7 +26,7 @@
         {% if not messages %}
         <div class="message assistant">
             <strong>Assistant</strong>
-            <div class="content">{% if ctx.role == 'compass_admin' %}Hi! I can help you spin up new Auth0 organizations, add or remove travel agents, generate contracts, and list customers, trips, or organizations. (Travel agents — not admins — are the ones who add customers.) What would you like to do?{% elif ctx.role == 'travel_agent' %}Hi! I can find flights, browse experiences, book trips, add new customers to your organization, and pull details on existing bookings. Pending customer requests show up on your dashboard for one-click approval. What would you like to do?{% elif ctx.role == 'customer' %}Hi! I can search flights and experiences, list your trips, add a trip to your Google Calendar, and submit booking requests for your travel agent to approve. What would you like to do?{% else %}Hi! I'm the Compass0 assistant. Your role isn't fully provisioned yet — ask an admin to assign you a role to unlock my tools.{% endif %}</div>
+            <div class="content">{% if ctx.role == 'compass_admin' %}Hi! I can help you spin up new Auth0 organizations, add or remove travel agents, generate contracts, and list customers, trips, or organizations. (Travel agents — not admins — are the ones who add customers.) What would you like to do?{% elif ctx.role == 'travel_agent' %}Hi! I can find flights, browse experiences, book trips, add new customers to your organization, and pull details on existing bookings. Pending customer requests show up on your dashboard for one-click approval. What would you like to do?{% elif ctx.role == 'customer' %}Hi! I can search flights and experiences, list your trips, add a trip to your Google Calendar, and submit booking requests for your travel agent to approve. What would you like to do?{% elif ctx.role == 'self_service' %}Hi! I can search flights and experiences and book them directly for you — no approval needed. What would you like to do?{% else %}Hi! I'm the Compass0 assistant. Your role isn't fully provisioned yet — ask an admin to assign you a role to unlock my tools.{% endif %}</div>
         </div>
         {% endif %}
     </div>
@@ -62,6 +62,14 @@
             {% if 'read:my_trips' in perms %}<button type="button" class="prompt-chip" data-prompt="List my trips">List my trips</button>{% endif %}
             {% if 'read:my_trips' in perms %}<button type="button" class="prompt-chip" data-prompt="Add my next trip to Google Calendar">Add trip to Calendar</button>{% endif %}
             {% if 'read:my_trips' in perms %}<button type="button" class="prompt-chip" data-prompt="Show my upcoming bookings">Upcoming bookings</button>{% endif %}
+        </div>
+        {% elif ctx.role == 'self_service' %}
+        <div class="prompt-chips" aria-label="Suggested prompts">
+            <span class="prompt-chips-label">Try:</span>
+            <button type="button" class="prompt-chip" data-prompt="Search for flights ">Search for flights</button>
+            {% if 'book:own_trips' in perms %}<button type="button" class="prompt-chip" data-prompt="Book a flight to ">Book a flight</button>{% endif %}
+            {% if 'book:own_experiences' in perms %}<button type="button" class="prompt-chip" data-prompt="Book an experience ">Book an experience</button>{% endif %}
+            {% if 'read:my_trips' in perms %}<button type="button" class="prompt-chip" data-prompt="List my trips">List my trips</button>{% endif %}
         </div>
         {% endif %}
     {% endif %}
@@ -123,6 +131,37 @@ document.querySelectorAll('.message.assistant .content').forEach((el) => {
     let cibaActiveIds = new Set();
     let cibaTimerHandle = null;
     let cibaStartTime = null;
+    let restoring = false;
+
+    const AGENT_LOG_KEY = 'compass0_agent_log:{{ user.sub | default("") }}';
+    let logEvents = [];
+
+    function saveLogEvents() {
+        try { localStorage.setItem(AGENT_LOG_KEY, JSON.stringify(logEvents)); } catch (_) {}
+    }
+
+    function clearLogEvents() {
+        logEvents = [];
+        try { localStorage.removeItem(AGENT_LOG_KEY); } catch (_) {}
+    }
+
+    function restoreLogEvents() {
+        let stored;
+        try { stored = JSON.parse(localStorage.getItem(AGENT_LOG_KEY) || 'null'); } catch (_) { return; }
+        if (!stored || !stored.length) return;
+        restoring = true;
+        for (const e of stored) {
+            if (e.t === 'user_turn') {
+                addUserTurnEntry(e);
+            } else if (e.t === 'tool_call') {
+                addLogEntry(e.id, e.name, e.args, e.ciba, e.reasoning, e.principal, e.layer);
+            } else if (e.t === 'tool_result') {
+                updateLogEntry(e.id, e.ok, e.ms, e.summary);
+            }
+        }
+        restoring = false;
+        logEvents = stored;
+    }
 
     function showCibaBanner() {
         if (!cibaBanner) return;
@@ -180,6 +219,7 @@ document.querySelectorAll('.message.assistant .content').forEach((el) => {
             try {
                 const resp = await fetch('/chat/clear', { method: 'POST' });
                 if (resp.ok) {
+                    clearLogEvents();
                     window.location.reload();
                 } else {
                     alert('Could not clear chat: ' + resp.status);
@@ -216,8 +256,143 @@ document.querySelectorAll('.message.assistant .content').forEach((el) => {
         return s.length > 40 ? s.slice(0, 40) + '…' : s;
     }
 
+    const CATEGORY_ICONS = {
+        cooking_class: '🍳', wine_tasting: '🍷', hike: '🥾',
+        day_trip: '🚌', food_tour: '🍜', cultural: '🏛️',
+    };
+
+    function buildFlightCards(data) {
+        const flights = (data.flights || []);
+        if (!flights.length) return null;
+
+        // Tag cheapest / nonstop-best
+        const prices = flights.map(f => f.price);
+        const minPrice = Math.min(...prices);
+        const nonstop = flights.filter(f => f.stops === 0);
+
+        const wrap = document.createElement('div');
+        wrap.className = 'search-cards';
+        const header = document.createElement('div');
+        header.className = 'search-cards-header';
+        header.textContent = `Flights · ${(data.origin||'').toUpperCase()} → ${(data.destination||'').toUpperCase()} · ${data.date || ''}`;
+        wrap.appendChild(header);
+
+        flights.forEach((f, i) => {
+            const card = document.createElement('div');
+            card.className = 'flight-card';
+
+            const isNonstop = f.stops === 0;
+            const isCheapest = f.price === minPrice;
+            const isBest = isNonstop && isCheapest;
+
+            card.innerHTML = `
+              <div class="flight-card-left">
+                <div class="flight-card-airline">
+                  <span class="flight-card-airline-icon">✈️</span>
+                  ${f.airline} · ${f.flight_no}
+                </div>
+                <div class="flight-card-route">
+                  <span class="flight-card-times">${f.depart_time}</span>
+                  <span class="flight-card-arrow">──────</span>
+                  <span class="flight-card-times">${f.arrive_time}</span>
+                </div>
+                <div class="flight-card-meta">
+                  <span>${f.duration}</span>
+                  <span class="flight-card-stops-badge ${isNonstop ? 'nonstop' : ''}">${isNonstop ? 'Nonstop' : f.stops + ' stop'}</span>
+                </div>
+              </div>
+              <div class="flight-card-right">
+                <div>
+                  <span class="flight-card-price">$${f.price}</span>
+                  <span class="flight-card-currency">${f.currency || 'USD'}</span>
+                </div>
+                ${isBest ? '<span class="flight-card-tag best">Best</span>' : isCheapest ? '<span class="flight-card-tag cheapest">Cheapest</span>' : ''}
+                <div class="flight-card-select-hint">Click to select →</div>
+              </div>
+            `;
+
+            card.addEventListener('click', () => {
+                const label = `Option ${i + 1} — ${f.airline} ${f.flight_no}, departing ${f.depart_time}`;
+                input.value = `I'll take ${label}`;
+                input.focus();
+            });
+            wrap.appendChild(card);
+        });
+        return wrap;
+    }
+
+    function buildExperienceCards(data) {
+        const experiences = (data.experiences || []);
+        if (!experiences.length) return null;
+
+        const wrap = document.createElement('div');
+        wrap.className = 'search-cards';
+        const header = document.createElement('div');
+        header.className = 'search-cards-header';
+        header.textContent = `Experiences · ${data.match_count || experiences.length} found`;
+        wrap.appendChild(header);
+
+        if (data.location_note) {
+            const note = document.createElement('div');
+            note.className = 'search-cards-note';
+            note.textContent = data.location_note;
+            wrap.appendChild(note);
+        }
+
+        const grid = document.createElement('div');
+        grid.className = 'experience-cards-grid';
+
+        experiences.forEach((e, i) => {
+            const card = document.createElement('div');
+            card.className = 'experience-card';
+            const icon = CATEGORY_ICONS[e.category] || '🌍';
+            const timesHtml = (e.available_times || []).map(t =>
+                `<span class="experience-time-chip" data-time="${t}">${t}</span>`
+            ).join('');
+
+            card.innerHTML = `
+              <div class="experience-card-top">
+                <span class="experience-card-icon">${icon}</span>
+                <span class="experience-card-price">$${e.price} <span style="font-size:0.72rem;font-weight:400;color:var(--muted)">${e.currency||'USD'}</span></span>
+              </div>
+              <div class="experience-card-name">${e.name}</div>
+              <div class="experience-card-location">📍 ${e.location}, ${e.country}</div>
+              <div class="experience-card-desc">${e.description || ''}</div>
+              <div class="experience-card-footer">
+                <div class="experience-card-times">${timesHtml}</div>
+                <span class="experience-card-duration">⏱ ${e.duration}</span>
+              </div>
+              <div class="experience-card-select-hint">Click a time slot or the card to select →</div>
+            `;
+
+            card.addEventListener('click', (ev) => {
+                const timeChip = ev.target.closest('.experience-time-chip');
+                const time = timeChip ? timeChip.dataset.time : (e.available_times || [])[0] || '';
+                const suffix = time ? ` at ${time}` : '';
+                input.value = `I'll take option ${i + 1} — ${e.name}${suffix}`;
+                input.focus();
+            });
+            grid.appendChild(card);
+        });
+        wrap.appendChild(grid);
+        return wrap;
+    }
+
+    function renderSearchCards(kind, data) {
+        const div = document.createElement('div');
+        div.className = 'message search-result-cards';
+        const strong = document.createElement('strong');
+        div.appendChild(strong);
+        const inner = kind === 'flights' ? buildFlightCards(data) : buildExperienceCards(data);
+        if (!inner) return;
+        div.appendChild(inner);
+        messages.appendChild(div);
+        messages.scrollTop = messages.scrollHeight;
+    }
+
     const LAYER_META = {
         agent:  { icon: '🤖', label: 'AI Agent',    cls: 'agent-log-layer-agent'  },
+        llm:    { icon: '🧠', label: 'LLM',         cls: 'agent-log-layer-llm'    },
         google: { icon: '🔗', label: 'Token Vault',  cls: 'agent-log-layer-google' },
         app:    { icon: '⚙️', label: 'App',          cls: 'agent-log-layer-app'    },
     };
@@ -248,7 +423,7 @@ document.querySelectorAll('.message.assistant .content').forEach((el) => {
         entry.appendChild(text);
 
         logEntries.appendChild(entry);
-        entry.scrollIntoView({ block: 'nearest' });
+        if (!restoring) entry.scrollIntoView({ block: 'nearest' });
     }
 
     function addLogEntry(id, name, args, ciba, reasoning, principal, layer) {
@@ -329,11 +504,13 @@ document.querySelectorAll('.message.assistant .content').forEach((el) => {
                 ? '<span class="agent-log-spinner"></span> Planning…'
                 : (ciba
                     ? '<span class="agent-log-spinner agent-log-spinner-ciba"></span> Waiting for device approval…'
-                    : '<span class="agent-log-spinner"></span> Running…');
+                    : layer === 'llm'
+                        ? '<span class="agent-log-spinner"></span> Generating…'
+                        : '<span class="agent-log-spinner"></span> Running…');
             entry.appendChild(statusEl);
 
             logEntries.appendChild(entry);
-            entry.scrollIntoView({ block: 'nearest' });
+            if (!restoring) entry.scrollIntoView({ block: 'nearest' });
 
             if (ciba) {
                 cibaActiveIds.add(id);
@@ -401,14 +578,26 @@ document.querySelectorAll('.message.assistant .content').forEach((el) => {
 
                         if (msg.t === 'user_turn') {
                             addUserTurnEntry(msg);
+                            logEvents.push({t: 'user_turn', user_name: msg.user_name, user_role: msg.user_role, org_name: msg.org_name, message: msg.message});
+                            saveLogEvents();
                         } else if (msg.t === 'chunk') {
                             textContent += msg.v;
                             assistantContent.innerHTML = renderMarkdown(textContent);
                             messages.scrollTop = messages.scrollHeight;
                         } else if (msg.t === 'tool_call') {
                             addLogEntry(msg.id, msg.name, msg.args, msg.ciba, msg.reasoning, msg.principal, msg.layer);
+                            logEvents.push({t: 'tool_call', id: msg.id, name: msg.name, args: msg.args, ciba: msg.ciba, reasoning: msg.reasoning, principal: msg.principal, layer: msg.layer});
+                            saveLogEvents();
                         } else if (msg.t === 'tool_result') {
                             updateLogEntry(msg.id, msg.ok, msg.ms, msg.summary);
+                            logEvents.push({t: 'tool_result', id: msg.id, ok: msg.ok, ms: msg.ms, summary: msg.summary});
+                            saveLogEvents();
+                        } else if (msg.t === 'search_cards') {
+                            renderSearchCards(msg.kind, msg.data);
+                        } else if (msg.t === 'llm_call') {
+                            addLogEntry(msg.id, msg.model, {}, false, false, null, 'llm');
+                        } else if (msg.t === 'llm_done') {
+                            updateLogEntry(msg.id, true, msg.ms, msg.has_tools ? 'called tools' : 'responded');
                         }
                     }
                 }
@@ -431,5 +620,7 @@ document.querySelectorAll('.message.assistant .content').forEach((el) => {
         input.disabled = false;
         input.focus();
     });
+
+    restoreLogEvents();
 })();
 </script>

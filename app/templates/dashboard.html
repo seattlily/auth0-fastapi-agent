@@ -180,6 +180,33 @@
     {% endif %}
 </div>
 
+{% elif ctx.role == 'self_service' %}
+
+<div class="card">
+    <h2>Your bookings</h2>
+    {% if bookings %}
+    <table>
+        <thead><tr><th>Booking</th><th>Where</th><th>When</th><th>Cost</th><th>Status</th></tr></thead>
+        <tbody>
+        {% for b in bookings %}
+            <tr>
+                <td>
+                    {% if b.link %}<a href="{{ b.link }}"><code>{{ b.id }}</code></a>{% else %}<code>{{ b.id }}</code>{% endif %}
+                    · {{ b.type }}
+                </td>
+                <td>{{ b.summary }}{% if b.location and b.kind == 'experience' %} <span class="muted">({{ b.location }})</span>{% endif %}</td>
+                <td>{{ b.date_label }}</td>
+                <td>{{ b.currency }} {{ '{:,.0f}'.format(b.cost) }}</td>
+                <td><span class="status-badge {{ b.status }}">{{ b.status }}</span></td>
+            </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <p class="muted">Nothing booked yet. Ask the assistant to search for flights or experiences.</p>
+    {% endif %}
+</div>
+
 {% else %}
 
 <div class="alert alert-info">

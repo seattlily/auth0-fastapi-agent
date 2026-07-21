@@ -763,23 +763,22 @@ def build_system_prompt(user: dict | None, ctx: dict) -> str:
         "politely explain what they can do instead.\n\n"
         "RULE — flight/trip booking (ALL roles): whenever anyone asks to "
         "book or request a flight or trip, ALWAYS call search_flights first. "
-        "Present the results as a numbered list (airline, route, dates, "
-        "price). Do NOT call book_trip or request_trip until the user has "
-        "replied and explicitly chosen one of the numbered options. Never "
-        "invent or default dates, cost, or any other field — take them from "
-        "the chosen search result. This rule applies to travel agents using "
-        "book_trip just as much as customers using request_trip.\n\n"
+        "The UI will automatically display results as visual cards — do NOT "
+        "re-list them in text. After the tool returns, say one short line "
+        "like 'Here are 3 options — pick one and I'll book it.' Do NOT call "
+        "book_trip, book_own_trip, or request_trip until the user has replied "
+        "and explicitly chosen one. Take origin, destination, depart_date, "
+        "return_date, and cost from the chosen result — never invent them.\n\n"
         "RULE — experience booking (ALL roles): whenever anyone asks to "
         "book or request an experience, ALWAYS call search_experiences first. "
-        "Present the results as a numbered list showing name, location, "
-        "price, and the available time slots from the 'available_times' "
-        "field. Wait for the user to choose an experience AND a specific "
-        "time slot before calling book_experience, book_customer_experience, "
-        "or request_experience. Never auto-select an experience or time. "
-        "CRITICAL: experience availability is NOT date-specific — "
-        "'available_times' are recurring daily slots, any future date is "
-        "valid. If the result has a 'location_note' field, mention it "
-        "briefly and still present the full list.\n\n"
+        "The UI will display results as visual cards — do NOT re-list them "
+        "in text. After the tool returns, say one short line like 'Here are "
+        "the experiences — pick one and a time slot.' Wait for the user to "
+        "choose an experience AND a specific time slot before calling "
+        "book_experience, book_own_experience, book_customer_experience, or "
+        "request_experience. Never auto-select. CRITICAL: 'available_times' "
+        "are recurring daily slots — any future date is valid. If the result "
+        "has a 'location_note' field, mention it briefly.\n\n"
         "Roles are distinct:\n"
         "- compass_admin: manages organizations (create_auth0_organization, "
         "delete_auth0_organization) and travel agents (create_travel_agent, "
@@ -791,12 +790,17 @@ def build_system_prompt(user: dict | None, ctx: dict) -> str:
         "customers whenever asked. Use book_trip and book_customer_experience "
         "to book travel for existing customers.\n"
         "- customer: can search flights and experiences, view trips, and "
-        "submit booking requests. Cannot book directly.\n\n"
-        "Booking approvals: customers cannot book directly. When a customer "
-        "asks to 'book' something, route them to request_trip / "
-        "request_experience — that creates a pending request a travel agent "
+        "submit booking requests. Cannot book directly.\n"
+        "- self_service: no org or travel agent. Books directly for "
+        "themselves using book_own_trip and book_own_experience — no "
+        "approval step needed.\n\n"
+        "Booking approvals: customers (role=customer) cannot book directly. "
+        "When a customer asks to 'book' something, route them to request_trip "
+        "/ request_experience — that creates a pending request a travel agent "
         "must approve from their dashboard. After calling request_*, tell the "
-        "customer their agent will review the request.\n\n"
+        "customer their agent will review the request. Self-service users "
+        "(role=self_service) skip the approval flow entirely and use "
+        "book_own_trip / book_own_experience instead.\n\n"
         "Multi-step reasoning: For any task that requires 3+ steps, "
         "multiple IDs to resolve, or sequential dependencies between tool "
         "calls, first call `think` to plan your approach before acting. "
@@ -1020,6 +1024,21 @@ async def dashboard(request: Request, response: Response):
                 "bookings": bookings,
                 "kpi": {"my_bookings": len(bookings)},
             },
+        )
+
+    if role == "self_service":
+        from mock_data import get_customer_by_sub
+        sub = ctx.get("sub")
+        customer = get_customer_by_sub(sub) if sub else None
+        customer_id = customer["id"] if customer else None
+        trips = get_trips(customer_id=customer_id) if customer_id else []
+        from mock_data import EXPERIENCES
+        experiences = [e for e in EXPERIENCES if e["customer_id"] == customer_id] if customer_id else []
+        bookings = _build_bookings(trips, experiences, [])
+        return templates.TemplateResponse(
+            request=request,
+            name="dashboard.html",
+            context={**common, "bookings": bookings, "kpi": {"my_bookings": len(bookings)}},
         )
 
     # role == "unknown"
@@ -1491,7 +1510,15 @@ async def chat_stream(request: Request, response: Response):
         }) + "\n\n"
 
         try:
-            for _ in range(MAX_TOOL_ITERATIONS):
+            for _iter in range(MAX_TOOL_ITERATIONS):
+                llm_call_id = f"llm_{_iter}"
+                yield "data: " + json.dumps({
+                    "t": "llm_call",
+                    "id": llm_call_id,
+                    "model": LLM_MODEL,
+                }) + "\n\n"
+
+                llm_start = time.monotonic()
                 kwargs = {"model": LLM_MODEL, "messages": messages, "stream": True}
                 if tool_schemas:
                     kwargs["tools"] = tool_schemas
@@ -1518,6 +1545,14 @@ async def chat_stream(request: Request, response: Response):
                                 slot["name"] = tc.function.name
                             if tc.function.arguments:
                                 slot["arguments"] += tc.function.arguments
+
+                llm_ms = int((time.monotonic() - llm_start) * 1000)
+                yield "data: " + json.dumps({
+                    "t": "llm_done",
+                    "id": llm_call_id,
+                    "ms": llm_ms,
+                    "has_tools": bool(tool_calls_acc),
+                }) + "\n\n"
 
                 if not tool_calls_acc:
                     return
@@ -1580,6 +1615,16 @@ async def chat_stream(request: Request, response: Response):
                         "ms": elapsed_ms,
                         "summary": summary or "",
                     }) + "\n\n"
+
+                    if not is_error and name in ("search_flights", "search_experiences"):
+                        try:
+                            yield "data: " + json.dumps({
+                                "t": "search_cards",
+                                "kind": "flights" if name == "search_flights" else "experiences",
+                                "data": json.loads(result),
+                            }) + "\n\n"
+                        except Exception:
+                            pass
 
                     messages.append(
                         {"role": "tool", "tool_call_id": tc["id"], "content": result}
@@ -1750,20 +1795,18 @@ async def connections_page(request: Request, response: Response):
         return RedirectResponse(url="/auth/login")
 
     ma_token = request.session.get("ma_access_token", "")
-    # Only redirect to authorize if there's no token AND no error to display
-    if not ma_token and not request.query_params.get("error"):
-        return RedirectResponse(url="/connections/authorize", status_code=303)
 
     accounts: list[dict] = []
     error: str | None = None
-    try:
-        accounts = await list_accounts(ma_token)
-    except MyAccountError as e:
-        err_str = str(e)
-        if "(401)" in err_str:
-            request.session.pop("ma_access_token", None)
-            return RedirectResponse(url="/connections/authorize", status_code=303)
-        error = err_str
+    if ma_token:
+        try:
+            accounts = await list_accounts(ma_token)
+        except MyAccountError as e:
+            err_str = str(e)
+            if "(401)" in err_str:
+                request.session.pop("ma_access_token", None)
+            else:
+                error = err_str
     return templates.TemplateResponse(
         request=request,
         name="connections.html",

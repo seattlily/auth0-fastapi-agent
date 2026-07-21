@@ -18,6 +18,8 @@ COMPANIES: list[dict] = [
      "budget": 120_000, "spent": 14_200, "currency": "USD"},
     {"id": "co_globex", "org_name": "globex-ltd", "display_name": "Globex Ltd",
      "budget": 400_000, "spent": 213_900, "currency": "EUR"},
+    {"id": "co_self", "org_name": "self_service", "display_name": "Self-Service",
+     "budget": 0, "spent": 0, "currency": "USD"},
 ]
 
 TRAVEL_AGENTS: list[dict] = [
@@ -132,6 +134,13 @@ def resolve_customer(identifier: str) -> Optional[dict]:
          (c.get("name") or "").lower() == sl),
         None,
     )
+
+
+def get_customer_by_sub(sub: str) -> Optional[dict]:
+    s = (sub or "").strip()
+    if not s:
+        return None
+    return next((c for c in CUSTOMERS if c.get("sub") == s), None)
 
 
 def get_customer_by_email(email: str) -> Optional[dict]:
@@ -313,6 +322,19 @@ def add_travel_agent(name: str, email: str, org_name: str) -> dict:
     }
     TRAVEL_AGENTS.append(agent)
     return agent
+
+
+def add_self_service_customer(name: str, email: str, sub: str) -> dict:
+    customer = {
+        "id": _next_id("cu_", CUSTOMERS),
+        "email": email,
+        "name": name,
+        "org_name": "self_service",
+        "agent_id": "",
+        "sub": sub,
+    }
+    CUSTOMERS.append(customer)
+    return customer
 
 
 def add_customer(name: str, email: str, org_name: str, agent_id: Optional[str] = None) -> dict:

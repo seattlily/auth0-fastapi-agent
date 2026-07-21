@@ -21,6 +21,7 @@ from mock_data import (
     add_customer,
     add_document,
     add_experience,
+    add_self_service_customer,
     add_travel_agent,
     add_trip,
     get_agents,
@@ -29,6 +30,7 @@ from mock_data import (
     get_company,
     get_customer,
     get_customer_by_email,
+    get_customer_by_sub,
     get_customers,
     get_experiences_for_trip,
     get_trip,
@@ -46,6 +48,10 @@ from mock_data import (
 async def list_my_trips(args: dict, ctx: dict) -> str:
     require(ctx, "read:my_trips")
     customer_id = ctx.get("customer_id")
+    if not customer_id and ctx.get("role") == "self_service":
+        sub = ctx.get("sub") or ""
+        customer = get_customer_by_sub(sub)
+        customer_id = customer["id"] if customer else None
     if not customer_id:
         return json.dumps({"error": "no customer_id on user — ask an admin to set app_metadata.customer_id"})
     return json.dumps(get_trips(customer_id=customer_id))
@@ -177,6 +183,52 @@ async def _ciba_step_up(ctx: dict, binding_message: str) -> str | None:
             }
         )
     return None
+
+
+def _get_or_create_self_service_customer(ctx: dict) -> dict:
+    sub = ctx.get("sub") or ""
+    customer = get_customer_by_sub(sub)
+    if customer:
+        return customer
+    name = ctx.get("name") or ctx.get("email") or sub
+    email = ctx.get("email") or f"user@self-service.local"
+    return add_self_service_customer(name=name, email=email, sub=sub)
+
+
+async def book_own_trip(args: dict, ctx: dict) -> str:
+    """Self-service: book a trip directly for the signed-in user."""
+    require(ctx, "book:own_trips")
+    if not ctx.get("sub"):
+        return json.dumps({"error": "no user sub in token"})
+    customer = _get_or_create_self_service_customer(ctx)
+    trip = add_trip(
+        customer_id=customer["id"],
+        type=args["type"],
+        origin=args["origin"],
+        destination=args["destination"],
+        depart_date=args["depart_date"],
+        return_date=args["return_date"],
+        cost=float(args["cost"]),
+        currency=args.get("currency", "USD"),
+    )
+    return json.dumps({"ok": True, "trip": trip})
+
+
+async def book_own_experience(args: dict, ctx: dict) -> str:
+    """Self-service: book an experience directly for the signed-in user."""
+    require(ctx, "book:own_experiences")
+    if not ctx.get("sub"):
+        return json.dumps({"error": "no user sub in token"})
+    customer = _get_or_create_self_service_customer(ctx)
+    exp = add_experience(
+        customer_id=customer["id"],
+        trip_id=args.get("trip_id", ""),
+        name=args["name"],
+        date=args["date"],
+        cost=float(args["cost"]),
+        location=args.get("location", ""),
+    )
+    return json.dumps({"ok": True, "experience": exp})
 
 
 async def book_trip(args: dict, ctx: dict) -> str:
@@ -1385,6 +1437,63 @@ TOOLS: dict[str, dict] = {
                         "org_name": {"type": "string", "description": "Org slug of an existing organization (e.g. 'acme-inc')."},
                     },
                     "required": ["org_name"],
+                },
+            },
+        },
+    },
+    "book_own_trip": {
+        "required_scopes": ("book:own_trips",),
+        "fn": book_own_trip,
+        "schema": {
+            "type": "function",
+            "function": {
+                "name": "book_own_trip",
+                "description": (
+                    "Book a flight, hotel, or train directly for the signed-in "
+                    "user (no approval needed). PRECONDITION — for flights, call "
+                    "search_flights first, show the options, and wait for the user "
+                    "to choose before calling this tool. Populate origin, "
+                    "destination, depart_date, and cost from the chosen result."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "type":         {"type": "string", "enum": ["flight", "hotel", "train"]},
+                        "origin":       {"type": "string", "description": "Origin city or IATA code."},
+                        "destination":  {"type": "string", "description": "Destination city or IATA code."},
+                        "depart_date":  {"type": "string", "description": "Departure date YYYY-MM-DD."},
+                        "return_date":  {"type": "string", "description": "Return date YYYY-MM-DD."},
+                        "cost":         {"type": "number", "description": "Total cost."},
+                        "currency":     {"type": "string", "description": "ISO currency code. Default USD."},
+                    },
+                    "required": ["type", "origin", "destination", "depart_date", "return_date", "cost"],
+                },
+            },
+        },
+    },
+    "book_own_experience": {
+        "required_scopes": ("book:own_experiences",),
+        "fn": book_own_experience,
+        "schema": {
+            "type": "function",
+            "function": {
+                "name": "book_own_experience",
+                "description": (
+                    "Book an experience directly for the signed-in user (no "
+                    "approval needed). PRECONDITION — call search_experiences "
+                    "first, show the options, and wait for the user to choose "
+                    "one AND a time slot before calling this tool."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "name":     {"type": "string", "description": "Experience name."},
+                        "date":     {"type": "string", "description": "Date YYYY-MM-DD."},
+                        "cost":     {"type": "number", "description": "Cost."},
+                        "location": {"type": "string", "description": "City or venue."},
+                        "trip_id":  {"type": "string", "description": "Optional trip ID to attach to."},
+                    },
+                    "required": ["name", "date", "cost"],
                 },
             },
         },
