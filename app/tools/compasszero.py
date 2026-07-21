@@ -784,6 +784,20 @@ async def request_trip(args: dict, ctx: dict) -> str:
     require(ctx, "read:my_trips")
     customer_id = ctx.get("customer_id")
     org = ctx.get("org_name")
+
+    # Fallback: look up customer record when token is missing customer_id or org_name
+    if not customer_id:
+        email = ctx.get("email")
+        if email:
+            cust = get_customer_by_email(email)
+            if cust:
+                customer_id = cust.get("id")
+                org = org or cust.get("org_name")
+    elif not org:
+        cust = get_customer(customer_id)
+        if cust:
+            org = cust.get("org_name")
+
     if not customer_id or not org:
         return json.dumps(
             {
@@ -827,6 +841,20 @@ async def request_experience(args: dict, ctx: dict) -> str:
     require(ctx, "read:my_trips")
     customer_id = ctx.get("customer_id")
     org = ctx.get("org_name")
+
+    # Fallback: look up customer record when token is missing customer_id or org_name
+    if not customer_id:
+        email = ctx.get("email")
+        if email:
+            cust = get_customer_by_email(email)
+            if cust:
+                customer_id = cust.get("id")
+                org = org or cust.get("org_name")
+    elif not org:
+        cust = get_customer(customer_id)
+        if cust:
+            org = cust.get("org_name")
+
     if not customer_id or not org:
         return json.dumps(
             {

@@ -457,10 +457,13 @@ document.querySelectorAll('.message.assistant .content').forEach((el) => {
             badge.textContent = meta.icon + ' ' + meta.label;
             nameRow.appendChild(badge);
 
-            const nameEl = document.createElement('span');
-            nameEl.className = 'agent-log-entry-name';
-            nameEl.textContent = reasoning ? 'Reasoning' : name;
-            nameRow.appendChild(nameEl);
+            const displayName = reasoning ? 'Reasoning' : name;
+            if (displayName) {
+                const nameEl = document.createElement('span');
+                nameEl.className = 'agent-log-entry-name';
+                nameEl.textContent = displayName;
+                nameRow.appendChild(nameEl);
+            }
             entry.appendChild(nameRow);
 
             // Principal: agent acting on behalf of user
@@ -595,7 +598,7 @@ document.querySelectorAll('.message.assistant .content').forEach((el) => {
                         } else if (msg.t === 'search_cards') {
                             renderSearchCards(msg.kind, msg.data);
                         } else if (msg.t === 'llm_call') {
-                            addLogEntry(msg.id, msg.model, {}, false, false, null, 'llm');
+                            addLogEntry(msg.id, '', {}, false, false, null, 'llm');
                         } else if (msg.t === 'llm_done') {
                             updateLogEntry(msg.id, true, msg.ms, msg.has_tools ? 'called tools' : 'responded');
                         }
