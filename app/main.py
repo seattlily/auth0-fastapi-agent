@@ -1508,6 +1508,9 @@ async def chat_stream(request: Request, response: Response):
             "org_name": ctx.get("org_name"),
         }) + "\n\n"
 
+        _AGENT_ID = "agent_orch"
+        yield "data: " + json.dumps({"t": "agent_call", "id": _AGENT_ID}) + "\n\n"
+
         try:
             for _iter in range(MAX_TOOL_ITERATIONS):
                 llm_call_id = f"llm_{_iter}"
@@ -1642,6 +1645,8 @@ async def chat_stream(request: Request, response: Response):
         except Exception as e:
             print(f"OpenAI API error: {type(e).__name__}: {e}")
             yield "data: " + json.dumps({"t": "chunk", "v": f"\n\nError: {type(e).__name__}: {e}"}) + "\n\n"
+        finally:
+            yield "data: " + json.dumps({"t": "agent_done", "id": _AGENT_ID}) + "\n\n"
 
     return StreamingResponse(
         generate(),

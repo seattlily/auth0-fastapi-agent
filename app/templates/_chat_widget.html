@@ -153,6 +153,14 @@ document.querySelectorAll('.message.assistant .content').forEach((el) => {
         for (const e of stored) {
             if (e.t === 'user_turn') {
                 addUserTurnEntry(e);
+            } else if (e.t === 'agent_call') {
+                addLogEntry(e.id, '', {}, false, false, null, 'agent');
+            } else if (e.t === 'agent_done') {
+                updateLogEntry(e.id, true, null, 'done');
+            } else if (e.t === 'llm_call') {
+                addLogEntry(e.id, '', {}, false, false, null, 'llm');
+            } else if (e.t === 'llm_done') {
+                updateLogEntry(e.id, true, e.ms, e.has_tools ? 'called tools' : 'responded');
             } else if (e.t === 'tool_call') {
                 addLogEntry(e.id, e.name, e.args, e.ciba, e.reasoning, e.principal, e.layer);
             } else if (e.t === 'tool_result') {
@@ -597,10 +605,22 @@ document.querySelectorAll('.message.assistant .content').forEach((el) => {
                             saveLogEvents();
                         } else if (msg.t === 'search_cards') {
                             renderSearchCards(msg.kind, msg.data);
+                        } else if (msg.t === 'agent_call') {
+                            addLogEntry(msg.id, '', {}, false, false, null, 'agent');
+                            logEvents.push({t: 'agent_call', id: msg.id});
+                            saveLogEvents();
+                        } else if (msg.t === 'agent_done') {
+                            updateLogEntry(msg.id, true, null, 'done');
+                            logEvents.push({t: 'agent_done', id: msg.id});
+                            saveLogEvents();
                         } else if (msg.t === 'llm_call') {
                             addLogEntry(msg.id, '', {}, false, false, null, 'llm');
+                            logEvents.push({t: 'llm_call', id: msg.id});
+                            saveLogEvents();
                         } else if (msg.t === 'llm_done') {
                             updateLogEntry(msg.id, true, msg.ms, msg.has_tools ? 'called tools' : 'responded');
+                            logEvents.push({t: 'llm_done', id: msg.id, ms: msg.ms, has_tools: msg.has_tools});
+                            saveLogEvents();
                         }
                     }
                 }

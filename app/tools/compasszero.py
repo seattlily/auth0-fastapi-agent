@@ -11,6 +11,7 @@ The dispatcher in main.py:
 """
 
 import json
+import math as _math
 from datetime import datetime
 from typing import Awaitable, Callable
 
@@ -200,6 +201,13 @@ async def book_own_trip(args: dict, ctx: dict) -> str:
     require(ctx, "book:own_trips")
     if not ctx.get("sub"):
         return json.dumps({"error": "no user sub in token"})
+    binding = (
+        f"Approve booking {args.get('type', 'flight')} "
+        f"{args.get('origin', '')} to {args.get('destination', '')} {args.get('depart_date', '')}"
+    )
+    err = await _ciba_step_up(ctx, binding)
+    if err:
+        return err
     customer = _get_or_create_self_service_customer(ctx)
     trip = add_trip(
         customer_id=customer["id"],
@@ -219,6 +227,10 @@ async def book_own_experience(args: dict, ctx: dict) -> str:
     require(ctx, "book:own_experiences")
     if not ctx.get("sub"):
         return json.dumps({"error": "no user sub in token"})
+    binding = f"Approve booking experience: {args.get('name', '')} on {args.get('date', '')}"
+    err = await _ciba_step_up(ctx, binding)
+    if err:
+        return err
     customer = _get_or_create_self_service_customer(ctx)
     exp = add_experience(
         customer_id=customer["id"],
@@ -311,41 +323,146 @@ async def cancel_experience(args: dict, ctx: dict) -> str:
 
 
 _AIRLINES = [
-    ("United Airlines", "UA", 1000),
-    ("Delta", "DL", 2000),
-    ("Lufthansa", "LH", 3000),
+    ("Alaska Airlines", "AS",  100),
+    ("Delta",           "DL", 2000),
+    ("United",          "UA", 1000),
 ]
+
+# (lat, lon) for airports and major cities used in mock data
+_CITY_COORDS: dict[str, tuple[float, float]] = {
+    "SEA": (47.45, -122.31), "SEATTLE": (47.45, -122.31),
+    "SFO": (37.62, -122.38), "SAN FRANCISCO": (37.62, -122.38),
+    "LAX": (33.94, -118.41), "LOS ANGELES": (33.94, -118.41), "LA": (33.94, -118.41),
+    "SAN": (32.73, -117.19), "SAN DIEGO": (32.73, -117.19),
+    "LAS": (36.08, -115.15), "LAS VEGAS": (36.08, -115.15),
+    "PDX": (45.59, -122.60), "PORTLAND": (45.59, -122.60),
+    "PHX": (33.44, -112.01), "PHOENIX": (33.44, -112.01),
+    "DEN": (39.86, -104.67), "DENVER": (39.86, -104.67),
+    "ANC": (61.17, -150.02), "ANCHORAGE": (61.17, -150.02),
+    "HNL": (21.32, -157.93), "HONOLULU": (21.32, -157.93), "HAWAII": (21.32, -157.93),
+    "OGG": (20.90, -156.43), "MAUI": (20.90, -156.43),
+    "ORD": (41.98,  -87.91), "CHICAGO": (41.98,  -87.91),
+    "MSP": (44.88,  -93.22), "MINNEAPOLIS": (44.88,  -93.22),
+    "IAH": (29.98,  -95.34), "HOUSTON": (29.98,  -95.34),
+    "DFW": (32.90,  -97.04), "DALLAS": (32.90,  -97.04),
+    "MSY": (29.99,  -90.26), "NEW ORLEANS": (29.99,  -90.26),
+    "JFK": (40.64,  -73.78), "NEW YORK": (40.64,  -73.78), "NYC": (40.64,  -73.78),
+    "EWR": (40.69,  -74.17),
+    "BOS": (42.36,  -71.01), "BOSTON": (42.36,  -71.01),
+    "IAD": (38.95,  -77.46), "WASHINGTON": (38.95,  -77.46), "DC": (38.95,  -77.46),
+    "ATL": (33.64,  -84.43), "ATLANTA": (33.64,  -84.43),
+    "MIA": (25.80,  -80.29), "MIAMI": (25.80,  -80.29),
+    "MCO": (28.43,  -81.31), "ORLANDO": (28.43,  -81.31),
+    "CLT": (35.21,  -80.94), "CHARLOTTE": (35.21,  -80.94),
+    "DTW": (42.21,  -83.35), "DETROIT": (42.21,  -83.35),
+    "YVR": (49.19, -123.18), "VANCOUVER": (49.19, -123.18),
+    "YYZ": (43.68,  -79.63), "TORONTO": (43.68,  -79.63),
+    "YUL": (45.47,  -73.74), "MONTREAL": (45.47,  -73.74),
+    "MEX": (19.43,  -99.07), "MEXICO CITY": (19.43,  -99.07),
+    "CUN": (21.04,  -86.87), "CANCUN": (21.04,  -86.87),
+    "LHR": (51.48,   -0.46), "LONDON": (51.48,   -0.46),
+    "CDG": (49.01,    2.55), "PARIS": (49.01,    2.55),
+    "AMS": (52.31,    4.77), "AMSTERDAM": (52.31,    4.77),
+    "FRA": (50.04,    8.56), "FRANKFURT": (50.04,    8.56),
+    "MUC": (48.35,   11.79), "MUNICH": (48.35,   11.79),
+    "ZRH": (47.46,    8.55), "ZURICH": (47.46,    8.55),
+    "VIE": (48.11,   16.57), "VIENNA": (48.11,   16.57),
+    "BCN": (41.30,    2.08), "BARCELONA": (41.30,    2.08),
+    "MAD": (40.49,   -3.57), "MADRID": (40.49,   -3.57),
+    "FCO": (41.80,   12.25), "ROME": (41.80,   12.25),
+    "MXP": (45.63,    8.73), "MILAN": (45.63,    8.73),
+    "CPH": (55.62,   12.66), "COPENHAGEN": (55.62,   12.66),
+    "ARN": (59.65,   17.92), "STOCKHOLM": (59.65,   17.92),
+    "DUB": (53.43,   -6.24), "DUBLIN": (53.43,   -6.24),
+    "LIS": (38.78,   -9.14), "LISBON": (38.78,   -9.14),
+    "ATH": (37.94,   23.95), "ATHENS": (37.94,   23.95),
+    "IST": (41.27,   28.75), "ISTANBUL": (41.27,   28.75),
+    "NRT": (35.76,  140.39), "TOKYO": (35.76,  140.39),
+    "ICN": (37.46,  126.44), "SEOUL": (37.46,  126.44),
+    "PEK": (40.07,  116.60), "BEIJING": (40.07,  116.60),
+    "PVG": (31.14,  121.80), "SHANGHAI": (31.14,  121.80),
+    "HKG": (22.31,  113.92), "HONG KONG": (22.31,  113.92),
+    "SIN": ( 1.36,  103.99), "SINGAPORE": ( 1.36,  103.99),
+    "BKK": (13.69,  100.75), "BANGKOK": (13.69,  100.75),
+    "SYD": (-33.94,  151.18), "SYDNEY": (-33.94,  151.18),
+    "MEL": (-37.67,  144.84), "MELBOURNE": (-37.67,  144.84),
+    "DXB": (25.25,   55.36), "DUBAI": (25.25,   55.36),
+    "DOH": (25.27,   51.61), "DOHA": (25.27,   51.61),
+    "DEL": (28.56,   77.10), "DELHI": (28.56,   77.10),
+    "BOM": (19.09,   72.87), "MUMBAI": (19.09,   72.87),
+    "JNB": (-26.13,  28.24), "JOHANNESBURG": (-26.13,  28.24),
+    "CPT": (-33.96,  18.60), "CAPE TOWN": (-33.96,  18.60),
+    "CAI": (30.11,   31.41), "CAIRO": (30.11,   31.41),
+    "GRU": (-23.43,  -46.47), "SAO PAULO": (-23.43,  -46.47),
+    "EZE": (-34.82,  -58.54), "BUENOS AIRES": (-34.82,  -58.54),
+    "LIM": (-12.02,  -77.11), "LIMA": (-12.02,  -77.11),
+}
+
+
+def _haversine_miles(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    r = 3958.8
+    dlat = _math.radians(lat2 - lat1)
+    dlon = _math.radians(lon2 - lon1)
+    a = (_math.sin(dlat / 2) ** 2
+         + _math.cos(_math.radians(lat1)) * _math.cos(_math.radians(lat2))
+         * _math.sin(dlon / 2) ** 2)
+    return 2 * r * _math.asin(_math.sqrt(a))
+
+
+def _nonstop_minutes(o: str, d: str) -> int:
+    oc = _CITY_COORDS.get(o)
+    dc = _CITY_COORDS.get(d)
+    if not oc or not dc:
+        return 270  # 4h30 fallback for unknown cities
+    dist = _haversine_miles(*oc, *dc)
+    return max(60, int(dist / 500 * 60 + 45))
+
+
+def _fmt_dur(minutes: int) -> str:
+    h, m = divmod(minutes, 60)
+    return f"{h}h {m:02d}m" if m else f"{h}h"
+
+
+def _add_min(hhmm: str, minutes: int) -> str:
+    h, m = map(int, hhmm.split(":"))
+    total = h * 60 + m + minutes
+    days, total = divmod(total, 1440)
+    s = f"{total // 60:02d}:{total % 60:02d}"
+    return f"{s}+{days}" if days else s
 
 
 def _mock_flights(origin: str, destination: str, date: str) -> list[dict]:
-    """Deterministic-ish mock flight options. Same inputs → same offers."""
+    """Realistic mock flight options using great-circle distance for durations."""
     o, d = origin.strip().upper(), destination.strip().upper()
     seed = sum(ord(c) for c in (o + d + date)) % 100
-    base = 250 + seed * 8
+    nonstop = _nonstop_minutes(o, d)
+    one_stop = nonstop + 90 + (seed % 30)
+    base_price = max(99, int(nonstop * 0.75) + seed * 3)
 
     schedules = [
-        ("08:30", "12:15", "3h 45m", 0, 0),
-        ("13:00", "16:55", "3h 55m", 0, 75),
-        ("21:45", "06:30+1", "5h 45m", 1, -40),
+        (6 + seed % 3,  (seed % 6) * 10,  0,  -20),
+        (11 + seed % 3, (seed * 7) % 60,   1,  -50),
+        (16 + seed % 4, (seed * 11) % 60,  0,   40),
     ]
+
     flights = []
-    for (name, code, base_no), (dep, arr, dur, stops, delta) in zip(_AIRLINES, schedules):
-        flights.append(
-            {
-                "id": f"fl_{code}{base_no + seed}_{o}{d}_{date}",
-                "airline": name,
-                "flight_no": f"{code}{base_no + seed}",
-                "origin": o,
-                "destination": d,
-                "date": date,
-                "depart_time": dep,
-                "arrive_time": arr,
-                "duration": dur,
-                "stops": stops,
-                "price": base + delta,
-                "currency": "USD",
-            }
-        )
+    for (name, code, base_no), (hour, minute, stops, pdelta) in zip(_AIRLINES, schedules):
+        dep = f"{hour:02d}:{minute:02d}"
+        dur = nonstop if stops == 0 else one_stop
+        flights.append({
+            "id": f"fl_{code}{base_no + seed}_{o}{d}_{date}",
+            "airline": name,
+            "flight_no": f"{code}{base_no + seed}",
+            "origin": o,
+            "destination": d,
+            "date": date,
+            "depart_time": dep,
+            "arrive_time": _add_min(dep, dur),
+            "duration": _fmt_dur(dur),
+            "stops": stops,
+            "price": max(99, base_price + pdelta),
+            "currency": "USD",
+        })
     return flights
 
 
@@ -778,9 +895,8 @@ async def generate_contract(args: dict, ctx: dict) -> str:
 
 
 async def request_trip(args: dict, ctx: dict) -> str:
-    """Customer-facing: submit a trip request that an agent in the
-    customer's org must approve before it becomes a booking. No CIBA;
-    the agent's approve action is what triggers MFA later."""
+    """Customer-facing: book a trip directly for the signed-in customer.
+    Requires CIBA step-up — the customer must approve on their enrolled device."""
     require(ctx, "read:my_trips")
     customer_id = ctx.get("customer_id")
     org = ctx.get("org_name")
@@ -798,46 +914,33 @@ async def request_trip(args: dict, ctx: dict) -> str:
         if cust:
             org = cust.get("org_name")
 
-    if not customer_id or not org:
-        return json.dumps(
-            {
-                "error": (
-                    "missing customer_id or org_name on token — log in via "
-                    "your travel agency's organization."
-                )
-            }
-        )
+    if not customer_id:
+        return json.dumps({"error": "could not identify customer — please contact support."})
 
-    details = {
-        "type": args.get("type", "flight"),
-        "origin": args["origin"],
-        "destination": args["destination"],
-        "depart_date": args["depart_date"],
-        "return_date": args["return_date"],
-        "cost": float(args["cost"]),
-        "currency": args.get("currency", "USD"),
-    }
-    req = add_approval_request(
-        kind="trip",
+    binding = (
+        f"Approve booking {args.get('type', 'flight')} "
+        f"{args['origin']} to {args['destination']} {args['depart_date']}"
+    )
+    err = await _ciba_step_up(ctx, binding)
+    if err:
+        return err
+
+    trip = add_trip(
         customer_id=customer_id,
-        org_name=org,
-        details=details,
+        type=args.get("type", "flight"),
+        origin=args["origin"],
+        destination=args["destination"],
+        depart_date=args["depart_date"],
+        return_date=args["return_date"],
+        cost=float(args["cost"]),
+        currency=args.get("currency", "USD"),
     )
-    return json.dumps(
-        {
-            "ok": True,
-            "request": req,
-            "message": (
-                "Your travel agent has been notified. They'll review and "
-                "approve or deny the request from their dashboard — you'll "
-                "see the trip on /trips once approved."
-            ),
-        }
-    )
+    return json.dumps({"ok": True, "trip": trip})
 
 
 async def request_experience(args: dict, ctx: dict) -> str:
-    """Customer-facing: request an experience that needs agent approval."""
+    """Customer-facing: book an experience directly for the signed-in customer.
+    Requires CIBA step-up — the customer must approve on their enrolled device."""
     require(ctx, "read:my_trips")
     customer_id = ctx.get("customer_id")
     org = ctx.get("org_name")
@@ -855,39 +958,23 @@ async def request_experience(args: dict, ctx: dict) -> str:
         if cust:
             org = cust.get("org_name")
 
-    if not customer_id or not org:
-        return json.dumps(
-            {
-                "error": (
-                    "missing customer_id or org_name on token — log in via "
-                    "your travel agency's organization."
-                )
-            }
-        )
+    if not customer_id:
+        return json.dumps({"error": "could not identify customer — please contact support."})
 
-    details = {
-        "name": args["name"],
-        "date": args["date"],
-        "cost": float(args["cost"]),
-        "location": args.get("location", ""),
-        "trip_id": args.get("trip_id", ""),
-    }
-    req = add_approval_request(
-        kind="experience",
+    binding = f"Approve booking experience: {args['name']} on {args['date']}"
+    err = await _ciba_step_up(ctx, binding)
+    if err:
+        return err
+
+    exp = add_experience(
         customer_id=customer_id,
-        org_name=org,
-        details=details,
+        trip_id=args.get("trip_id", ""),
+        name=args["name"],
+        date=args["date"],
+        cost=float(args["cost"]),
+        location=args.get("location", ""),
     )
-    return json.dumps(
-        {
-            "ok": True,
-            "request": req,
-            "message": (
-                "Your travel agent has been notified. They'll review and "
-                "approve or deny the request from their dashboard."
-            ),
-        }
-    )
+    return json.dumps({"ok": True, "experience": exp})
 
 
 async def create_my_customer(args: dict, ctx: dict) -> str:
@@ -1534,16 +1621,12 @@ TOOLS: dict[str, dict] = {
             "function": {
                 "name": "request_trip",
                 "description": (
-                    "Submit a trip request for agent approval. "
-                    "PRECONDITION — you MUST call search_flights first and "
-                    "show the customer the numbered results. Only call "
-                    "request_trip AFTER the customer has explicitly chosen "
-                    "one of the options from those results. Populate "
-                    "origin, destination, depart_date, return_date, and "
-                    "cost directly from the chosen search result — never "
-                    "invent or default these values. If you have not yet "
-                    "called search_flights in this conversation, do that "
-                    "first instead of calling this tool."
+                    "Book a flight, hotel, or train directly for the signed-in customer. "
+                    "Requires CIBA step-up — the customer will approve on their enrolled device. "
+                    "PRECONDITION — for flights, you MUST call search_flights first, show the "
+                    "options as cards, and wait for the customer to choose one before calling "
+                    "this tool. Populate origin, destination, depart_date, return_date, and "
+                    "cost directly from the chosen result — never invent or default these values."
                 ),
                 "parameters": {
                     "type": "object",
@@ -1569,12 +1652,11 @@ TOOLS: dict[str, dict] = {
             "function": {
                 "name": "request_experience",
                 "description": (
-                    "Submit a request for an experience (cooking class, wine "
-                    "tasting, hike, etc.) that the customer's travel agent "
-                    "will approve or deny. Use whenever a CUSTOMER says 'book "
-                    "this experience for me', 'I want the Tuscan cooking "
-                    "class', etc. Customers can't book directly; their agent "
-                    "must approve."
+                    "Book an experience (cooking class, wine tasting, hike, etc.) directly "
+                    "for the signed-in customer. Requires CIBA step-up — the customer will "
+                    "approve on their enrolled device. PRECONDITION — call search_experiences "
+                    "first, show the options as cards, and wait for the customer to choose "
+                    "one before calling this tool."
                 ),
                 "parameters": {
                     "type": "object",
