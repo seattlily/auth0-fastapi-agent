@@ -1617,11 +1617,20 @@ async def chat_stream(request: Request, response: Response):
 
                     if not is_error and name in ("search_flights", "search_experiences"):
                         try:
+                            parsed_result = json.loads(result)
                             yield "data: " + json.dumps({
                                 "t": "search_cards",
                                 "kind": "flights" if name == "search_flights" else "experiences",
-                                "data": json.loads(result),
+                                "data": parsed_result,
                             }) + "\n\n"
+                            # Suppress text re-listing: the UI already shows cards.
+                            parsed_result["_ui_note"] = (
+                                "Results are shown as interactive cards in the UI above. "
+                                "Do NOT describe or list the options in text. "
+                                "Respond with exactly ONE short sentence "
+                                "(e.g. 'Pick one above and I\\'ll book it.') then stop."
+                            )
+                            result = json.dumps(parsed_result)
                         except Exception:
                             pass
 
