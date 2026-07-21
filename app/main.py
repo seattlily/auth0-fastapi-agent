@@ -1032,7 +1032,6 @@ async def dashboard(request: Request, response: Response):
         customer = get_customer_by_sub(sub) if sub else None
         customer_id = customer["id"] if customer else None
         trips = get_trips(customer_id=customer_id) if customer_id else []
-        from mock_data import EXPERIENCES
         experiences = [e for e in EXPERIENCES if e["customer_id"] == customer_id] if customer_id else []
         bookings = _build_bookings(trips, experiences, [])
         return templates.TemplateResponse(
