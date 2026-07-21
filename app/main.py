@@ -173,6 +173,10 @@ CIBA_GATED_CHAT_TOOLS = {
     "delete_auth0_organization",
     "delete_travel_agent",
     "delete_customer",
+    "request_trip",
+    "request_experience",
+    "book_own_trip",
+    "book_own_experience",
 }
 
 
@@ -790,17 +794,18 @@ def build_system_prompt(user: dict | None, ctx: dict) -> str:
         "customers whenever asked. Use book_trip and book_customer_experience "
         "to book travel for existing customers.\n"
         "- customer: can search flights and experiences, view trips, and "
-        "submit booking requests. Cannot book directly.\n"
+        "book directly using request_trip / request_experience. CIBA "
+        "step-up is required — the customer approves on their device.\n"
         "- self_service: no org or travel agent. Books directly for "
-        "themselves using book_own_trip and book_own_experience — no "
-        "approval step needed.\n\n"
-        "Booking approvals: customers (role=customer) cannot book directly. "
-        "When a customer asks to 'book' something, route them to request_trip "
-        "/ request_experience — that creates a pending request a travel agent "
-        "must approve from their dashboard. After calling request_*, tell the "
-        "customer their agent will review the request. Self-service users "
-        "(role=self_service) skip the approval flow entirely and use "
-        "book_own_trip / book_own_experience instead.\n\n"
+        "themselves using book_own_trip and book_own_experience. CIBA "
+        "step-up is also required.\n\n"
+        "Booking flow: both customer and self_service roles book directly — "
+        "there is NO agent approval queue. When a customer or self-service "
+        "user asks to book, call request_trip / request_experience (customer) "
+        "or book_own_trip / book_own_experience (self_service). CIBA will "
+        "prompt the user to approve on their device, then the booking is "
+        "confirmed immediately. After a successful booking, tell the user "
+        "their trip is confirmed — do NOT say it needs agent review.\n\n"
         "Multi-step reasoning: For any task that requires 3+ steps, "
         "multiple IDs to resolve, or sequential dependencies between tool "
         "calls, first call `think` to plan your approach before acting. "
