@@ -42,6 +42,7 @@ from mock_data import (
     get_trip,
     get_trips,
     remove_experience,
+    remove_trip,
     update_approval_request,
 )
 from permissions import (
@@ -2389,6 +2390,65 @@ async def cancel_own_booking(
         remove_experience(booking_id)
         return RedirectResponse(
             url=f"/dashboard?success={quote_plus('Experience ' + booking_id + ' cancelled')}",
+            status_code=303,
+        )
+
+    return RedirectResponse(url="/dashboard?error=unknown+booking+type", status_code=303)
+
+
+@app.post("/my/bookings/{kind}/{booking_id}/delete")
+async def delete_own_booking(
+    request: Request, response: Response, kind: str, booking_id: str
+):
+    from urllib.parse import quote_plus
+
+    user, _, ctx = await require_login(request, response)
+    if not user:
+        return RedirectResponse(url="/auth/login")
+
+    role = ctx.get("role")
+    if role not in ("customer", "self_service"):
+        return RedirectResponse(url="/dashboard", status_code=303)
+
+    customer_id: str | None = None
+    if role == "customer":
+        customer_id = ctx.get("customer_id")
+    else:
+        from mock_data import get_customer_by_sub
+        sub = ctx.get("sub")
+        c = get_customer_by_sub(sub) if sub else None
+        customer_id = c["id"] if c else None
+
+    if not customer_id:
+        return RedirectResponse(
+            url="/dashboard?error=could+not+identify+your+account", status_code=303
+        )
+
+    if kind == "trip":
+        trip = get_trip(booking_id)
+        if not trip or trip["customer_id"] != customer_id:
+            return RedirectResponse(url="/dashboard?error=booking+not+found", status_code=303)
+        if trip["status"] != "cancelled":
+            return RedirectResponse(
+                url="/dashboard?error=only+cancelled+trips+can+be+deleted", status_code=303
+            )
+        remove_trip(booking_id)
+        return RedirectResponse(
+            url=f"/dashboard?success={quote_plus('Booking ' + booking_id + ' deleted')}",
+            status_code=303,
+        )
+
+    if kind == "experience":
+        exp = next((e for e in EXPERIENCES if e["id"] == booking_id), None)
+        if not exp or exp["customer_id"] != customer_id:
+            return RedirectResponse(url="/dashboard?error=booking+not+found", status_code=303)
+        if exp.get("status") not in ("cancelled", None):
+            return RedirectResponse(
+                url="/dashboard?error=only+cancelled+experiences+can+be+deleted", status_code=303
+            )
+        remove_experience(booking_id)
+        return RedirectResponse(
+            url=f"/dashboard?success={quote_plus('Booking ' + booking_id + ' deleted')}",
             status_code=303,
         )
 

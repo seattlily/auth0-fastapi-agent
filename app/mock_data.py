@@ -301,6 +301,20 @@ def remove_experience(experience_id: str) -> Optional[dict]:
     return None
 
 
+def remove_trip(trip_id: str) -> Optional[dict]:
+    """Remove a trip by ID. Returns the removed record or None."""
+    for t in list(TRIPS):
+        if t["id"] == trip_id:
+            TRIPS.remove(t)
+            customer = get_customer(t["customer_id"])
+            if customer:
+                company = get_company(org_name=customer["org_name"])
+                if company:
+                    company["spent"] = max(0, company.get("spent", 0) - t["cost"])
+            return t
+    return None
+
+
 def remove_travel_agent(email: str, org_name: str) -> Optional[dict]:
     """Remove a travel agent matching email + org_name from the local
     list. Returns the removed record or None if no match."""

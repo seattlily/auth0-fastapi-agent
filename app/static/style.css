@@ -402,6 +402,23 @@ table tbody tr:hover { background: var(--surface-alt); }
 }
 .btn-secondary:hover { background: var(--surface-alt); color: var(--text); border-color: var(--text); }
 .btn-small { padding: 0.45rem 0.95rem; font-size: 0.85rem; }
+.btn-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 2rem;
+    height: 2rem;
+    padding: 0;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+    background: var(--surface);
+    color: var(--muted);
+    cursor: pointer;
+    transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+.btn-icon:hover { background: var(--surface-alt); }
+.btn-icon-danger:hover { background: #fef2f2; border-color: #fca5a5; color: #dc2626; }
+[data-theme="dark"] .btn-icon-danger:hover { background: #3b0000; border-color: #7f1d1d; color: #f87171; }
 .btn-danger {
     background: var(--surface);
     color: var(--text);
