@@ -2354,6 +2354,10 @@ async def cancel_own_booking(
     customer_id: str | None = None
     if role == "customer":
         customer_id = ctx.get("customer_id")
+        if not customer_id:
+            cust = get_customer_by_email((user or {}).get("email") or "")
+            if cust:
+                customer_id = cust["id"]
     else:
         from mock_data import get_customer_by_sub
         sub = ctx.get("sub")
@@ -2413,6 +2417,10 @@ async def delete_own_booking(
     customer_id: str | None = None
     if role == "customer":
         customer_id = ctx.get("customer_id")
+        if not customer_id:
+            cust = get_customer_by_email((user or {}).get("email") or "")
+            if cust:
+                customer_id = cust["id"]
     else:
         from mock_data import get_customer_by_sub
         sub = ctx.get("sub")

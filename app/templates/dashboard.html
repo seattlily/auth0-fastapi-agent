@@ -142,6 +142,9 @@
 
 {% elif ctx.role == 'customer' %}
 
+{% if flash_success %}<div class="alert alert-success"><strong>Success:</strong> {{ flash_success }}</div>{% endif %}
+{% if flash_error %}<div class="alert alert-error"><strong>Error:</strong> {{ flash_error }}</div>{% endif %}
+
 {% if my_company %}
 <div class="card-grid">
     <div class="kpi">
@@ -195,6 +198,9 @@
 </div>
 
 {% elif ctx.role == 'self_service' %}
+
+{% if flash_success %}<div class="alert alert-success"><strong>Success:</strong> {{ flash_success }}</div>{% endif %}
+{% if flash_error %}<div class="alert alert-error"><strong>Error:</strong> {{ flash_error }}</div>{% endif %}
 
 <div class="card">
     <h2>Your bookings</h2>
