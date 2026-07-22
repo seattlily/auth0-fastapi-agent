@@ -937,17 +937,14 @@ async def dashboard(request: Request, response: Response):
     ]
 
     # Surface a one-shot enrollment nudge for any role whose actions
-    # trigger CIBA — admins (org create/delete) and travel agents
-    # (book/cancel trip). Customers don't have CIBA-gated actions, so
-    # skip the lookup for them.
+    # trigger CIBA (booking trips requires device approval for all roles).
     needs_enrollment = False
-    if role in ("compass_admin", "travel_agent"):
-        user_sub = ctx.get("sub") or user.get("sub")
-        if user_sub:
-            try:
-                needs_enrollment = not await list_user_enrollments(user_sub)
-            except ManagementError:
-                pass
+    user_sub = ctx.get("sub") or user.get("sub")
+    if user_sub and role in ("compass_admin", "travel_agent", "customer", "self_service"):
+        try:
+            needs_enrollment = not await list_user_enrollments(user_sub)
+        except ManagementError:
+            pass
 
     common = {
         "user": user,
