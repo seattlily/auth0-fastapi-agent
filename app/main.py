@@ -807,6 +807,14 @@ def build_system_prompt(user: dict | None, ctx: dict) -> str:
         "prompt the user to approve on their device, then the booking is "
         "confirmed immediately. After a successful booking, tell the user "
         "their trip is confirmed — do NOT say it needs agent review.\n\n"
+        "Google tool authorization: Calendar and Gmail tools require the "
+        "user to have connected their Google account via Token Vault. If a "
+        "Google tool returns error='missing_google_scope', the user hasn't "
+        "granted that permission yet. Say: 'It looks like I don\\'t have "
+        "access to your [scope_needed]. Would you like to authorize it?' — "
+        "if they say yes, tell them to go to [authorize_url] (show as a "
+        "clickable link). Do NOT retry the tool. If the user has no "
+        "connected Google account at all, direct them to /connections.\n\n"
         "Multi-step reasoning: For any task that requires 3+ steps, "
         "multiple IDs to resolve, or sequential dependencies between tool "
         "calls, first call `think` to plan your approach before acting. "
@@ -1472,8 +1480,30 @@ async def dispatch_any_tool(name: str, args: dict, ctx: dict, refresh_token: str
         try:
             return await dispatch_google_tool(name, args, refresh_token)
         except TokenVaultError as e:
-            return json.dumps({"error": str(e)})
+            msg = str(e)
+            if msg.startswith("MISSING_SCOPE:"):
+                parts = msg.split(":", 2)
+                scope = parts[1] if len(parts) > 1 else "Google"
+                detail = parts[2] if len(parts) > 2 else msg
+                return json.dumps({
+                    "error": "missing_google_scope",
+                    "scope_needed": scope,
+                    "detail": detail,
+                    "authorize_url": "/connections",
+                })
+            return json.dumps({"error": msg})
         except Exception as e:
+            msg = str(e)
+            _scope_keywords = ("insufficient", "403", "forbidden", "scope", "permission denied")
+            if any(k in msg.lower() for k in _scope_keywords):
+                tool_name_lower = name.lower()
+                scope = "Gmail" if "gmail" in tool_name_lower or "email" in tool_name_lower else "Google Calendar"
+                return json.dumps({
+                    "error": "missing_google_scope",
+                    "scope_needed": scope,
+                    "detail": f"Insufficient permissions for {scope}. Go to /connections to reconnect your Google account.",
+                    "authorize_url": "/connections",
+                })
             return json.dumps({"error": f"{type(e).__name__}: {e}"})
     return json.dumps({"error": f"unknown tool: {name}"})
 

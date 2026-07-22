@@ -72,6 +72,16 @@ async def get_federated_access_token(
     return resp.json()["access_token"]
 
 
+def _check_scope_error(exc: Exception, scope_name: str) -> None:
+    """Re-raise as TokenVaultError with a reauth hint if this is a 403/scope error."""
+    msg = str(exc).lower()
+    if "403" in msg or "insufficient" in msg or "forbidden" in msg or "scope" in msg:
+        raise TokenVaultError(
+            f"MISSING_SCOPE:{scope_name}:You haven't granted {scope_name} access. "
+            "Go to /connections to reconnect your Google account with the required permissions."
+        )
+
+
 async def list_upcoming_calendar_events(
     refresh_token: str, days: int = 7, max_results: int = 5
 ) -> str:
@@ -79,19 +89,23 @@ async def list_upcoming_calendar_events(
 
     service = build("calendar", "v3", credentials=Credentials(google_access_token))
     now = datetime.datetime.utcnow()
-    events = (
-        service.events()
-        .list(
-            calendarId="primary",
-            timeMin=now.isoformat() + "Z",
-            timeMax=(now + datetime.timedelta(days=days)).isoformat() + "Z",
-            maxResults=max_results,
-            singleEvents=True,
-            orderBy="startTime",
+    try:
+        events = (
+            service.events()
+            .list(
+                calendarId="primary",
+                timeMin=now.isoformat() + "Z",
+                timeMax=(now + datetime.timedelta(days=days)).isoformat() + "Z",
+                maxResults=max_results,
+                singleEvents=True,
+                orderBy="startTime",
+            )
+            .execute()
+            .get("items", [])
         )
-        .execute()
-        .get("items", [])
-    )
+    except Exception as e:
+        _check_scope_error(e, "Google Calendar")
+        raise
 
     return json.dumps(
         [
@@ -130,11 +144,15 @@ async def create_calendar_event(
     if attendees:
         event["attendees"] = [{"email": e} for e in attendees]
 
-    created = (
-        service.events()
-        .insert(calendarId="primary", body=event, sendUpdates="none")
-        .execute()
-    )
+    try:
+        created = (
+            service.events()
+            .insert(calendarId="primary", body=event, sendUpdates="none")
+            .execute()
+        )
+    except Exception as e:
+        _check_scope_error(e, "Google Calendar")
+        raise
 
     google_email = await get_google_account_email(google_access_token)
     html_link = _calendar_link_for_account(created.get("htmlLink"), google_email)

@@ -3,7 +3,7 @@ import json
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 
-from .google_calendar import get_federated_access_token
+from .google_calendar import TokenVaultError, _check_scope_error, get_federated_access_token
 
 
 async def list_recent_emails(
@@ -14,16 +14,20 @@ async def list_recent_emails(
     google_access_token = await get_federated_access_token(refresh_token, "google-oauth2")
     service = build("gmail", "v1", credentials=Credentials(google_access_token))
 
-    list_resp = (
-        service.users()
-        .messages()
-        .list(
-            userId="me",
-            maxResults=max(1, min(max_results, 25)),
-            q=query or "in:inbox",
+    try:
+        list_resp = (
+            service.users()
+            .messages()
+            .list(
+                userId="me",
+                maxResults=max(1, min(max_results, 25)),
+                q=query or "in:inbox",
+            )
+            .execute()
         )
-        .execute()
-    )
+    except Exception as e:
+        _check_scope_error(e, "Gmail")
+        raise
 
     messages = list_resp.get("messages", []) or []
     out: list[dict] = []
