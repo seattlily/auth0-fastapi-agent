@@ -472,7 +472,7 @@ document.querySelectorAll('.message.assistant .content').forEach((el) => {
         entry.appendChild(text);
 
         logEntries.appendChild(entry);
-        if (!restoring) entry.scrollIntoView({ block: 'nearest' });
+        if (!restoring) logEntries.scrollTop = logEntries.scrollHeight;
     }
 
     // Track LLM accumulation per agent turn
@@ -527,7 +527,7 @@ document.querySelectorAll('.message.assistant .content').forEach((el) => {
         entry.appendChild(statusEl);
 
         logEntries.appendChild(entry);
-        if (!restoring) entry.scrollIntoView({ block: 'nearest' });
+        if (!restoring) logEntries.scrollTop = logEntries.scrollHeight;
     }
 
     function onLlmCall(agentId) {
@@ -624,7 +624,7 @@ document.querySelectorAll('.message.assistant .content').forEach((el) => {
         entry.appendChild(statusEl);
 
         logEntries.appendChild(entry);
-        if (!restoring) entry.scrollIntoView({ block: 'nearest' });
+        if (!restoring) logEntries.scrollTop = logEntries.scrollHeight;
 
         if (ciba) {
             cibaActiveIds.add(id);

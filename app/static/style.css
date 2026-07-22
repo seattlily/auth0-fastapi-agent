@@ -566,6 +566,7 @@ table tbody tr:hover { background: var(--surface-alt); }
 .chat-layout-compact .agent-log {
     position: static;
     order: 1;
+    max-height: 320px;
 }
 
 /* ── Dark mode toggle ──────────────────────────────────────────────── */
@@ -594,9 +595,10 @@ table tbody tr:hover { background: var(--surface-alt); }
     background: var(--surface);
     border: 1px solid var(--border-soft);
     border-radius: var(--radius-lg);
-    overflow: visible;
+    overflow: hidden;
     position: sticky;
     top: 80px;
+    max-height: calc(100vh - 120px);
     display: flex;
     flex-direction: column;
 }
@@ -622,10 +624,20 @@ table tbody tr:hover { background: var(--surface-alt); }
 }
 /* Timeline layout */
 .agent-log-entries {
-    overflow: visible;
+    overflow-y: auto;
+    flex: 1;
     padding: 0.9rem 0.6rem 0.9rem 2.1rem;
     position: relative;
+    scrollbar-width: thin;
+    scrollbar-color: var(--border) transparent;
 }
+.agent-log-entries::-webkit-scrollbar { width: 3px; }
+.agent-log-entries::-webkit-scrollbar-track { background: transparent; }
+.agent-log-entries::-webkit-scrollbar-thumb {
+    background: var(--border);
+    border-radius: 2px;
+}
+.agent-log-entries::-webkit-scrollbar-thumb:hover { background: var(--muted); }
 /* Vertical spine */
 .agent-log-entries::before {
     content: '';
@@ -928,7 +940,7 @@ table tbody tr:hover { background: var(--surface-alt); }
     }
     .agent-log {
         position: static;
-        max-height: 220px;
+        max-height: 260px;
         order: 1;
     }
 }
