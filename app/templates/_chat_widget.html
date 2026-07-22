@@ -580,7 +580,11 @@ document.querySelectorAll('.message.assistant .content').forEach((el) => {
         badge.textContent = meta.icon + ' ' + meta.label;
         nameRow.appendChild(badge);
 
-        const displayName = reasoning ? 'Reasoning' : name;
+        const _FRIENDLY_NAMES = {
+            token_vault_exchange: 'POST /oauth/token',
+        };
+        const isTokenVaultStep = name === 'token_vault_exchange';
+        const displayName = reasoning ? 'Reasoning' : (_FRIENDLY_NAMES[name] || name);
         if (displayName) {
             const nameEl = document.createElement('span');
             nameEl.className = 'agent-log-entry-name';
@@ -588,6 +592,7 @@ document.querySelectorAll('.message.assistant .content').forEach((el) => {
             nameRow.appendChild(nameEl);
         }
         entry.appendChild(nameRow);
+        if (isTokenVaultStep) entry.classList.add('agent-log-substep');
 
         if (reasoning) {
             const text = (args && args.reasoning) ? args.reasoning : '';
@@ -613,7 +618,9 @@ document.querySelectorAll('.message.assistant .content').forEach((el) => {
             ? '<span class="agent-log-spinner"></span> Planning…'
             : (ciba
                 ? '<span class="agent-log-spinner agent-log-spinner-ciba"></span> Waiting for device approval…'
-                : '<span class="agent-log-spinner"></span> Running…');
+                : isTokenVaultStep
+                    ? '<span class="agent-log-spinner"></span> Exchanging token…'
+                    : '<span class="agent-log-spinner"></span> Running…');
         entry.appendChild(statusEl);
 
         logEntries.appendChild(entry);

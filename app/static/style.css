@@ -798,6 +798,13 @@ table tbody tr:hover { background: var(--surface-alt); }
 }
 .agent-log-ciba .agent-log-entry-status { color: #b45309; font-weight: 600; }
 [data-theme="dark"] .agent-log-ciba .agent-log-entry-status { color: #fbbf24; }
+.agent-log-substep {
+    margin-left: 1.25rem;
+    opacity: 0.88;
+    border-left: 2px solid var(--border);
+    padding-left: 0.5rem;
+}
+.agent-log-substep::before { display: none; }
 @keyframes ciba-dot-pulse {
     0%, 100% { box-shadow: 0 0 0 0 rgba(245, 158, 11, 0); }
     50%       { box-shadow: 0 0 0 4px rgba(245, 158, 11, 0.28); }

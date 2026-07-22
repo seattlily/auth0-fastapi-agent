@@ -1642,9 +1642,52 @@ async def chat_stream(request: Request, response: Response):
                         },
                     }) + "\n\n"
 
+                    # Emit a visible sub-step for the Auth0 Token Vault exchange
+                    tv_call_id = None
+                    tv_start = None
+                    if name in _GOOGLE_LAYER_TOOLS and refresh_token:
+                        tv_call_id = f"tv_{tc['id']}"
+                        tv_start = time.monotonic()
+                        yield "data: " + json.dumps({
+                            "t": "tool_call",
+                            "id": tv_call_id,
+                            "name": "token_vault_exchange",
+                            "args": {
+                                "connection": "google-oauth2",
+                                "grant": "federated-connection-access-token",
+                                "for": name,
+                            },
+                            "ciba": False,
+                            "reasoning": False,
+                            "layer": "google",
+                            "principal": {
+                                "agent_id": AUTH0_AGENT_ID,
+                                "user_sub": ctx.get("sub"),
+                                "user_name": (user or {}).get("name"),
+                                "user_role": ctx.get("role"),
+                                "org_name": ctx.get("org_name"),
+                            },
+                        }) + "\n\n"
+
                     start_t = time.monotonic()
                     result = await dispatch_any_tool(name, args, ctx, refresh_token)
                     elapsed_ms = int((time.monotonic() - start_t) * 1000)
+
+                    # Resolve the Token Vault sub-step
+                    if tv_call_id is not None:
+                        tv_elapsed = int((time.monotonic() - tv_start) * 1000) if tv_start else elapsed_ms
+                        try:
+                            _tv_parsed = json.loads(result)
+                            tv_scope_error = isinstance(_tv_parsed, dict) and _tv_parsed.get("error") == "missing_google_scope"
+                        except Exception:
+                            tv_scope_error = False
+                        yield "data: " + json.dumps({
+                            "t": "tool_result",
+                            "id": tv_call_id,
+                            "ok": not tv_scope_error,
+                            "ms": tv_elapsed,
+                            "summary": "Missing scope — needs authorization" if tv_scope_error else "Access token issued",
+                        }) + "\n\n"
 
                     is_error = False
                     try:
