@@ -12,6 +12,7 @@ The dispatcher in main.py:
 
 import json
 import math as _math
+import re as _re
 from datetime import datetime
 from typing import Awaitable, Callable
 
@@ -409,11 +410,52 @@ def _haversine_miles(lat1: float, lon1: float, lat2: float, lon2: float) -> floa
     return 2 * r * _math.asin(_math.sqrt(a))
 
 
+_CITY_ALIASES: dict[str, str] = {
+    "SF": "SFO", "NYC": "JFK", "DC": "IAD", "WASH": "IAD",
+    "WASHINGTON DC": "IAD", "WASHINGTON, DC": "IAD",
+    "NEW YORK CITY": "JFK", "NEW YORK, NY": "JFK",
+    "LOS ANGELES, CA": "LAX", "SAN FRANCISCO, CA": "SFO",
+    "SEATTLE, WA": "SEA", "CHICAGO, IL": "ORD",
+    "DENVER, CO": "DEN", "MIAMI, FL": "MIA",
+    "BOSTON, MA": "BOS", "ATLANTA, GA": "ATL",
+    "DALLAS, TX": "DFW", "HOUSTON, TX": "IAH",
+    "PHOENIX, AZ": "PHX", "PORTLAND, OR": "PDX",
+    "LAS VEGAS, NV": "LAS", "SAN DIEGO, CA": "SAN",
+    "MINNEAPOLIS, MN": "MSP", "DETROIT, MI": "DTW",
+}
+
+
+def _resolve_city(name: str) -> tuple[float, float] | None:
+    """Resolve city name / IATA code / common alias to (lat, lon), or None."""
+    key = name.strip().upper()
+    coords = _CITY_COORDS.get(key)
+    if coords:
+        return coords
+    # Try alias table
+    alias = _CITY_ALIASES.get(key)
+    if alias:
+        return _CITY_COORDS.get(alias)
+    # Strip trailing ", ST" or ", Country" (e.g. "Seattle, WA" → "SEATTLE")
+    stripped = _re.sub(r",\s*[A-Z]{2,3}$", "", key).strip()
+    if stripped != key:
+        coords = _CITY_COORDS.get(stripped)
+        if coords:
+            return coords
+        alias = _CITY_ALIASES.get(stripped)
+        if alias:
+            return _CITY_COORDS.get(alias)
+    # Prefix match (e.g. "SAN FRANCISCO BAY" → "SAN FRANCISCO")
+    for k, v in _CITY_COORDS.items():
+        if key.startswith(k) or k.startswith(key):
+            return v
+    return None
+
+
 def _nonstop_minutes(o: str, d: str) -> int:
-    oc = _CITY_COORDS.get(o)
-    dc = _CITY_COORDS.get(d)
+    oc = _resolve_city(o)
+    dc = _resolve_city(d)
     if not oc or not dc:
-        return 270  # 4h30 fallback for unknown cities
+        return 150  # 2h30 fallback for unknown cities
     dist = _haversine_miles(*oc, *dc)
     return max(60, int(dist / 500 * 60 + 45))
 

@@ -41,6 +41,7 @@ from mock_data import (
     get_experiences_for_trip,
     get_trip,
     get_trips,
+    remove_experience,
     update_approval_request,
 )
 from permissions import (
@@ -1634,22 +1635,39 @@ async def chat_stream(request: Request, response: Response):
                         "summary": summary or "",
                     }) + "\n\n"
 
-                    if not is_error and name in ("search_flights", "search_experiences"):
+                    _TRIP_LIST_TOOLS = {"list_my_trips", "list_company_trips", "list_all_trips"}
+                    if not is_error and name in ("search_flights", "search_experiences", *_TRIP_LIST_TOOLS):
                         try:
                             parsed_result = json.loads(result)
-                            yield "data: " + json.dumps({
-                                "t": "search_cards",
-                                "kind": "flights" if name == "search_flights" else "experiences",
-                                "data": parsed_result,
-                            }) + "\n\n"
-                            # Suppress text re-listing: the UI already shows cards.
-                            parsed_result["_ui_note"] = (
-                                "Results are shown as interactive cards in the UI above. "
-                                "Do NOT describe or list the options in text. "
-                                "Respond with exactly ONE short sentence "
-                                "(e.g. 'Pick one above and I\\'ll book it.') then stop."
-                            )
-                            result = json.dumps(parsed_result)
+                            if name in _TRIP_LIST_TOOLS:
+                                trips = parsed_result if isinstance(parsed_result, list) else []
+                                if trips:
+                                    yield "data: " + json.dumps({
+                                        "t": "search_cards",
+                                        "kind": "bookings",
+                                        "data": trips,
+                                    }) + "\n\n"
+                                    ui_note = (
+                                        "Bookings are shown as a table in the UI. "
+                                        "Do NOT list them again in plain text. "
+                                        "Give one brief summary sentence only."
+                                    )
+                                    parsed_result = {"trips": trips, "_ui_note": ui_note}
+                                    result = json.dumps(parsed_result)
+                            else:
+                                yield "data: " + json.dumps({
+                                    "t": "search_cards",
+                                    "kind": "flights" if name == "search_flights" else "experiences",
+                                    "data": parsed_result,
+                                }) + "\n\n"
+                                # Suppress text re-listing: the UI already shows cards.
+                                parsed_result["_ui_note"] = (
+                                    "Results are shown as interactive cards in the UI above. "
+                                    "Do NOT describe or list the options in text. "
+                                    "Respond with exactly ONE short sentence "
+                                    "(e.g. 'Pick one above and I\\'ll book it.') then stop."
+                                )
+                                result = json.dumps(parsed_result)
                         except Exception:
                             pass
 
@@ -2242,3 +2260,63 @@ async def approvals_deny(
         url=f"/dashboard?success={quote_plus('Denied request ' + request_id)}",
         status_code=303,
     )
+
+
+@app.post("/my/bookings/{kind}/{booking_id}/cancel")
+async def cancel_own_booking(
+    request: Request, response: Response, kind: str, booking_id: str
+):
+    from urllib.parse import quote_plus
+
+    user, _, ctx = await require_login(request, response)
+    if not user:
+        return RedirectResponse(url="/auth/login")
+
+    role = ctx.get("role")
+    if role not in ("customer", "self_service"):
+        return RedirectResponse(url="/dashboard", status_code=303)
+
+    # Resolve customer_id for this user
+    customer_id: str | None = None
+    if role == "customer":
+        customer_id = ctx.get("customer_id")
+    else:
+        from mock_data import get_customer_by_sub
+        sub = ctx.get("sub")
+        c = get_customer_by_sub(sub) if sub else None
+        customer_id = c["id"] if c else None
+
+    if not customer_id:
+        return RedirectResponse(
+            url="/dashboard?error=could+not+identify+your+account", status_code=303
+        )
+
+    if kind == "trip":
+        trip = get_trip(booking_id)
+        if not trip or trip["customer_id"] != customer_id:
+            return RedirectResponse(
+                url="/dashboard?error=booking+not+found", status_code=303
+            )
+        if trip["status"] in ("cancelled", "completed"):
+            return RedirectResponse(
+                url=f"/dashboard?error=booking+already+{trip['status']}", status_code=303
+            )
+        trip["status"] = "cancelled"
+        return RedirectResponse(
+            url=f"/dashboard?success={quote_plus('Booking ' + booking_id + ' cancelled')}",
+            status_code=303,
+        )
+
+    if kind == "experience":
+        exp = next((e for e in EXPERIENCES if e["id"] == booking_id), None)
+        if not exp or exp["customer_id"] != customer_id:
+            return RedirectResponse(
+                url="/dashboard?error=booking+not+found", status_code=303
+            )
+        remove_experience(booking_id)
+        return RedirectResponse(
+            url=f"/dashboard?success={quote_plus('Experience ' + booking_id + ' cancelled')}",
+            status_code=303,
+        )
+
+    return RedirectResponse(url="/dashboard?error=unknown+booking+type", status_code=303)

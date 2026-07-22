@@ -26,7 +26,7 @@
         {% if not messages %}
         <div class="message assistant">
             <strong>Assistant</strong>
-            <div class="content">{% if ctx.role == 'compass_admin' %}Hi! I can help you spin up new Auth0 organizations, add or remove travel agents, generate contracts, and list customers, trips, or organizations. (Travel agents — not admins — are the ones who add customers.) What would you like to do?{% elif ctx.role == 'travel_agent' %}Hi! I can find flights, browse experiences, book trips, add new customers to your organization, and pull details on existing bookings. Pending customer requests show up on your dashboard for one-click approval. What would you like to do?{% elif ctx.role == 'customer' %}Hi! I can search flights and experiences, list your trips, add a trip to your Google Calendar, and submit booking requests for your travel agent to approve. What would you like to do?{% elif ctx.role == 'self_service' %}Hi! I can search flights and experiences and book them directly for you — no approval needed. What would you like to do?{% else %}Hi! I'm the Compass0 assistant. Your role isn't fully provisioned yet — ask an admin to assign you a role to unlock my tools.{% endif %}</div>
+            <div class="content">{% if ctx.role == 'compass_admin' %}Hi! I can help you spin up new Auth0 organizations, add or remove travel agents, generate contracts, and list customers, trips, or organizations. (Travel agents — not admins — are the ones who add customers.) What would you like to do?{% elif ctx.role == 'travel_agent' %}Hi! I can find flights, browse experiences, book trips, add new customers to your organization, and pull details on existing bookings. Pending customer requests show up on your dashboard for one-click approval. What would you like to do?{% elif ctx.role == 'customer' %}Hi! I can search flights and experiences, book trips directly for you (requires device approval), list your bookings, and add trips to your Google Calendar. What would you like to do?{% elif ctx.role == 'self_service' %}Hi! I can search flights and experiences and book them directly for you (requires device approval). What would you like to do?{% else %}Hi! I'm the Compass0 assistant. Your role isn't fully provisioned yet — ask an admin to assign you a role to unlock my tools.{% endif %}</div>
         </div>
         {% endif %}
     </div>
@@ -57,8 +57,8 @@
         {% elif ctx.role == 'customer' %}
         <div class="prompt-chips" aria-label="Suggested prompts">
             <span class="prompt-chips-label">Try:</span>
-            <button type="button" class="prompt-chip" data-prompt="Search for flights ">Search for flights</button>
-            {% if 'read:my_trips' in perms %}<button type="button" class="prompt-chip" data-prompt="Request a trip to ">Request a trip</button>{% endif %}
+            <button type="button" class="prompt-chip" data-prompt="Search for flights from ">Search for flights</button>
+            {% if 'read:my_trips' in perms %}<button type="button" class="prompt-chip" data-prompt="Book a flight to ">Book a flight</button>{% endif %}
             {% if 'read:my_trips' in perms %}<button type="button" class="prompt-chip" data-prompt="List my trips">List my trips</button>{% endif %}
             {% if 'read:my_trips' in perms %}<button type="button" class="prompt-chip" data-prompt="Add my next trip to Google Calendar">Add trip to Calendar</button>{% endif %}
             {% if 'read:my_trips' in perms %}<button type="button" class="prompt-chip" data-prompt="Show my upcoming bookings">Upcoming bookings</button>{% endif %}
@@ -386,12 +386,54 @@ document.querySelectorAll('.message.assistant .content').forEach((el) => {
         return wrap;
     }
 
+    function buildBookingTable(data) {
+        const items = Array.isArray(data) ? data : (data.trips || data.bookings || []);
+        if (!items.length) return null;
+
+        const STATUS_COLOR = { booked: '#1976d2', completed: '#388e3c', cancelled: '#c62828', pending: '#f57c00' };
+
+        const wrap = document.createElement('div');
+        wrap.className = 'search-cards';
+        const header = document.createElement('div');
+        header.className = 'search-cards-header';
+        header.textContent = `Your bookings · ${items.length} found`;
+        wrap.appendChild(header);
+
+        const table = document.createElement('table');
+        table.className = 'booking-table';
+        table.innerHTML = `<thead><tr>
+            <th>ID</th><th>Type</th><th>Route / Detail</th>
+            <th>Dates</th><th>Cost</th><th>Status</th>
+        </tr></thead>`;
+        const tbody = document.createElement('tbody');
+        items.forEach(t => {
+            const tr = document.createElement('tr');
+            const status = t.status || 'booked';
+            const color = STATUS_COLOR[status] || '#555';
+            tr.innerHTML = `
+              <td><code style="font-size:0.78rem">${t.id}</code></td>
+              <td>${t.type || ''}</td>
+              <td>${t.origin && t.destination ? t.origin + ' → ' + t.destination : (t.name || '')}</td>
+              <td style="white-space:nowrap">${t.depart_date ? t.depart_date + (t.return_date ? ' – ' + t.return_date : '') : (t.date || '')}</td>
+              <td>${t.currency || 'USD'} ${(t.cost||0).toLocaleString()}</td>
+              <td><span class="status-badge ${status}" style="background:${color}1a;color:${color};border:1px solid ${color}40">${status}</span></td>
+            `;
+            tbody.appendChild(tr);
+        });
+        table.appendChild(tbody);
+        wrap.appendChild(table);
+        return wrap;
+    }
+
     function renderSearchCards(kind, data) {
         const div = document.createElement('div');
         div.className = 'message search-result-cards';
         const strong = document.createElement('strong');
         div.appendChild(strong);
-        const inner = kind === 'flights' ? buildFlightCards(data) : buildExperienceCards(data);
+        let inner = null;
+        if (kind === 'flights') inner = buildFlightCards(data);
+        else if (kind === 'experiences') inner = buildExperienceCards(data);
+        else if (kind === 'bookings') inner = buildBookingTable(data);
         if (!inner) return;
         div.appendChild(inner);
         messages.appendChild(div);

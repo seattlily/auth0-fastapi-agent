@@ -159,7 +159,7 @@
     <h2>Your bookings</h2>
     {% if bookings %}
     <table>
-        <thead><tr><th>Booking</th><th>Where</th><th>When</th><th>Cost</th><th>Status</th></tr></thead>
+        <thead><tr><th>Booking</th><th>Where</th><th>When</th><th>Cost</th><th>Status</th><th></th></tr></thead>
         <tbody>
         {% for b in bookings %}
             <tr>
@@ -171,6 +171,13 @@
                 <td>{{ b.date_label }}</td>
                 <td>{{ b.currency }} {{ '{:,.0f}'.format(b.cost) }}</td>
                 <td><span class="status-badge {{ b.status }}">{{ b.status }}</span></td>
+                <td>
+                    {% if b.status not in ('cancelled', 'completed') %}
+                    <form method="post" action="/my/bookings/{{ b.kind }}/{{ b.id }}/cancel" onsubmit="return confirm('Cancel this booking?');" style="margin:0;">
+                        <button type="submit" class="btn btn-small btn-secondary">Cancel</button>
+                    </form>
+                    {% endif %}
+                </td>
             </tr>
         {% endfor %}
         </tbody>
@@ -186,7 +193,7 @@
     <h2>Your bookings</h2>
     {% if bookings %}
     <table>
-        <thead><tr><th>Booking</th><th>Where</th><th>When</th><th>Cost</th><th>Status</th></tr></thead>
+        <thead><tr><th>Booking</th><th>Where</th><th>When</th><th>Cost</th><th>Status</th><th></th></tr></thead>
         <tbody>
         {% for b in bookings %}
             <tr>
@@ -198,6 +205,13 @@
                 <td>{{ b.date_label }}</td>
                 <td>{{ b.currency }} {{ '{:,.0f}'.format(b.cost) }}</td>
                 <td><span class="status-badge {{ b.status }}">{{ b.status }}</span></td>
+                <td>
+                    {% if b.status not in ('cancelled', 'completed') %}
+                    <form method="post" action="/my/bookings/{{ b.kind }}/{{ b.id }}/cancel" onsubmit="return confirm('Cancel this booking?');" style="margin:0;">
+                        <button type="submit" class="btn btn-small btn-secondary">Cancel</button>
+                    </form>
+                    {% endif %}
+                </td>
             </tr>
         {% endfor %}
         </tbody>

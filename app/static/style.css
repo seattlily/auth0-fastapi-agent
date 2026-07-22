@@ -537,7 +537,7 @@ table tbody tr:hover { background: var(--surface-alt); }
 
 .chat-layout {
     display: grid;
-    grid-template-columns: 1fr 280px;
+    grid-template-columns: 1fr 340px;
     gap: 1.5rem;
     align-items: start;
 }
@@ -548,7 +548,6 @@ table tbody tr:hover { background: var(--surface-alt); }
 }
 .chat-layout-compact .agent-log {
     position: static;
-    max-height: 180px;
     order: 1;
 }
 
@@ -578,10 +577,9 @@ table tbody tr:hover { background: var(--surface-alt); }
     background: var(--surface);
     border: 1px solid var(--border-soft);
     border-radius: var(--radius-lg);
-    overflow: hidden;
+    overflow: visible;
     position: sticky;
     top: 80px;
-    max-height: calc(100vh - 120px);
     display: flex;
     flex-direction: column;
 }
@@ -607,8 +605,7 @@ table tbody tr:hover { background: var(--surface-alt); }
 }
 /* Timeline layout */
 .agent-log-entries {
-    flex: 1;
-    overflow-y: auto;
+    overflow: visible;
     padding: 0.9rem 0.6rem 0.9rem 2.1rem;
     position: relative;
 }
@@ -1208,6 +1205,30 @@ table tbody tr:hover { background: var(--surface-alt); }
     letter-spacing: 0.05em;
     margin-bottom: 0.1rem;
 }
+
+/* Booking table (rendered in chat) */
+.booking-table {
+    width: 100%;
+    font-size: 0.82rem;
+    border-collapse: collapse;
+}
+.booking-table th {
+    text-align: left;
+    padding: 0.35rem 0.6rem;
+    font-size: 0.72rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--muted);
+    border-bottom: 1px solid var(--border-soft);
+}
+.booking-table td {
+    padding: 0.45rem 0.6rem;
+    border-bottom: 1px solid var(--border-soft);
+    vertical-align: middle;
+}
+.booking-table tr:last-child td { border-bottom: none; }
+.booking-table tr:hover td { background: var(--surface-alt); }
 
 /* Flight card */
 .flight-card {
