@@ -724,10 +724,12 @@ async def require_login(request: Request, response: Response) -> tuple[dict, dic
         request.session.pop("pending_connect", None)
         request.session.pop("user_organizations", None)
 
-    # Multi-org membership lookup, cached on the session so we hit
-    # the Management API once per login. Surfaces the top-nav
-    # switcher when the user belongs to 2+ Auth0 Organizations.
-    if user and "user_organizations" not in request.session:
+    # Multi-org membership lookup — only meaningful when the current
+    # token carries org_id context. Skipping it when org_id is absent
+    # prevents the top-nav switcher from appearing (and triggering a
+    # re-login with organization=) after the tenant removes the org
+    # login requirement.
+    if user and ctx.get("org_id") and "user_organizations" not in request.session:
         try:
             request.session["user_organizations"] = (
                 await list_user_organizations(sub) if sub else []
