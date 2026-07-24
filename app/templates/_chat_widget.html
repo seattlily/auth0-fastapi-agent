@@ -604,8 +604,7 @@ document.querySelectorAll('.message.assistant .content').forEach((el) => {
             nameRow.appendChild(nameEl);
         }
         entry.appendChild(nameRow);
-        if (isTokenVaultStep || isCibaSubstep) entry.classList.add('agent-log-substep');
-        if (isCibaSubstep) entry.classList.add('agent-log-substep-ciba');
+        if (isTokenVaultStep) entry.classList.add('agent-log-substep');
 
         if (reasoning) {
             const text = (args && args.reasoning) ? args.reasoning : '';
