@@ -4,11 +4,35 @@
 match the `org_name` you set on each Auth0 Organization to a
 COMPANIES[i]["org_name"] entry below.
 
-Resets on every uvicorn restart. Demo only.
+Manual deletions (remove_trip / remove_experience) are persisted to
+data/deleted_ids.json so they survive server restarts.
 """
 
+import json
+import pathlib
 from datetime import datetime
 from typing import Iterable, Optional
+
+_DATA_DIR = pathlib.Path(__file__).parent / "data"
+_DATA_DIR.mkdir(exist_ok=True)
+_DELETED_FILE = _DATA_DIR / "deleted_ids.json"
+
+
+def _load_deleted() -> set[str]:
+    try:
+        return set(json.loads(_DELETED_FILE.read_text()))
+    except Exception:
+        return set()
+
+
+def _persist_deleted(ids: set[str]) -> None:
+    try:
+        _DELETED_FILE.write_text(json.dumps(sorted(ids)))
+    except Exception:
+        pass
+
+
+_DELETED_IDS: set[str] = _load_deleted()
 
 
 COMPANIES: list[dict] = [
@@ -40,7 +64,7 @@ CUSTOMERS: list[dict] = [
     {"id": "cu_quinn",  "email": "quinn@globex.example",    "name": "Quinn O'Hara",    "org_name": "globex-ltd",     "agent_id": "ag_dana"},
 ]
 
-TRIPS: list[dict] = [
+TRIPS: list[dict] = [t for t in [
     {"id": "tr_001", "customer_id": "cu_jane",  "type": "flight", "origin": "JFK", "destination": "LHR", "depart_date": "2026-07-15", "return_date": "2026-07-22", "cost": 1200, "currency": "USD", "status": "booked"},
     {"id": "tr_002", "customer_id": "cu_jane",  "type": "hotel",  "origin": "London", "destination": "London", "depart_date": "2026-07-15", "return_date": "2026-07-22", "cost": 1800, "currency": "USD", "status": "booked"},
     {"id": "tr_003", "customer_id": "cu_john",  "type": "flight", "origin": "SFO", "destination": "NRT", "depart_date": "2026-08-02", "return_date": "2026-08-12", "cost": 1750, "currency": "USD", "status": "booked"},
@@ -53,7 +77,7 @@ TRIPS: list[dict] = [
     {"id": "tr_010", "customer_id": "cu_quinn", "type": "flight", "origin": "DUB", "destination": "JFK", "depart_date": "2026-06-10", "return_date": "2026-06-17", "cost": 720,  "currency": "EUR", "status": "completed"},
     {"id": "tr_011", "customer_id": "cu_quinn", "type": "hotel",  "origin": "New York", "destination": "New York", "depart_date": "2026-06-10", "return_date": "2026-06-17", "cost": 2300, "currency": "EUR", "status": "completed"},
     {"id": "tr_012", "customer_id": "cu_jane",  "type": "train",  "origin": "London", "destination": "Edinburgh", "depart_date": "2026-07-19", "return_date": "2026-07-20", "cost": 95,   "currency": "USD", "status": "booked"},
-]
+] if t["id"] not in _DELETED_IDS]
 
 DOCUMENTS: list[dict] = []
 # Each entry:
@@ -69,14 +93,14 @@ APPROVAL_REQUESTS: list[dict] = []
 #     trip_id, experience_id, created_at, decided_at, decided_by, decision_note }
 
 
-EXPERIENCES: list[dict] = [
+EXPERIENCES: list[dict] = [e for e in [
     {"id": "ex_001", "customer_id": "cu_jane",  "trip_id": "tr_001", "name": "London Eye + Tower bridge tour",   "date": "2026-07-16", "cost": 65,  "location": "London"},
     {"id": "ex_002", "customer_id": "cu_jane",  "trip_id": "tr_001", "name": "West End theatre night",           "date": "2026-07-18", "cost": 110, "location": "London"},
     {"id": "ex_003", "customer_id": "cu_john",  "trip_id": "tr_003", "name": "Tsukiji food tour",                "date": "2026-08-04", "cost": 95,  "location": "Tokyo"},
     {"id": "ex_004", "customer_id": "cu_marco", "trip_id": "tr_005", "name": "Vatican private tour",             "date": "2026-09-06", "cost": 180, "location": "Rome"},
     {"id": "ex_005", "customer_id": "cu_oscar", "trip_id": "tr_007", "name": "Gardens by the Bay evening visit", "date": "2026-07-22", "cost": 40,  "location": "Singapore"},
     {"id": "ex_006", "customer_id": "cu_priya", "trip_id": "tr_009", "name": "Stonehenge day trip",              "date": "2026-08-18", "cost": 85,  "location": "Wiltshire"},
-]
+] if e["id"] not in _DELETED_IDS]
 
 
 # ---------- read helpers ----------
@@ -289,6 +313,8 @@ def remove_customer(customer_id: str) -> Optional[dict]:
 
 def remove_experience(experience_id: str) -> Optional[dict]:
     """Remove an experience by ID. Returns the removed record or None."""
+    _DELETED_IDS.add(experience_id)
+    _persist_deleted(_DELETED_IDS)
     for e in list(EXPERIENCES):
         if e["id"] == experience_id:
             EXPERIENCES.remove(e)
@@ -303,6 +329,8 @@ def remove_experience(experience_id: str) -> Optional[dict]:
 
 def remove_trip(trip_id: str) -> Optional[dict]:
     """Remove a trip by ID. Returns the removed record or None."""
+    _DELETED_IDS.add(trip_id)
+    _persist_deleted(_DELETED_IDS)
     for t in list(TRIPS):
         if t["id"] == trip_id:
             TRIPS.remove(t)

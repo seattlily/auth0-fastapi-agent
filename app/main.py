@@ -2021,8 +2021,14 @@ async def connections_connect(request: Request, response: Response, connection: 
             scopes=scopes,
         )
     except MyAccountError as e:
+        err_str = str(e)
+        if "(401)" in err_str:
+            # Cached token has wrong audience or expired — clear it and
+            # send the user through the explicit code flow to get a real MA token.
+            request.session.pop("ma_access_token", None)
+            return RedirectResponse(url="/connections/authorize", status_code=303)
         return RedirectResponse(
-            url=f"/connections?error={quote_plus(str(e))}", status_code=303
+            url=f"/connections?error={quote_plus(err_str)}", status_code=303
         )
 
     request.session["pending_connect"] = {
