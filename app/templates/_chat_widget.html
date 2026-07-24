@@ -443,6 +443,7 @@ document.querySelectorAll('.message.assistant .content').forEach((el) => {
     const LAYER_META = {
         agent:  { icon: '🤖', label: 'AI Agent',    cls: 'agent-log-layer-agent'  },
         google: { icon: '🔗', label: 'Token Vault',  cls: 'agent-log-layer-google' },
+        auth0:  { icon: '🔐', label: 'Auth0 CIBA',   cls: 'agent-log-layer-auth0'  },
         app:    { icon: '⚙️', label: 'App',          cls: 'agent-log-layer-app'    },
     };
 
@@ -605,6 +606,7 @@ document.querySelectorAll('.message.assistant .content').forEach((el) => {
         }
         entry.appendChild(nameRow);
         if (isTokenVaultStep) entry.classList.add('agent-log-substep');
+        if (isCibaSubstep) { entry.classList.add('agent-log-substep'); entry.classList.add('agent-log-substep-ciba'); }
 
         if (reasoning) {
             const text = (args && args.reasoning) ? args.reasoning : '';

@@ -721,8 +721,10 @@ table tbody tr:hover { background: var(--surface-alt); }
 .agent-log-layer-llm::before    { border-color: #7c3aed; background: #ede7f6; }
 .agent-log-layer-google::before { border-color: #2e7d32; background: #e8f5e9; }
 .agent-log-layer-app::before    { border-color: var(--border); background: var(--surface-alt); }
+.agent-log-layer-auth0::before  { border-color: #f59e0b; background: #fffbeb; }
 [data-theme="dark"] .agent-log-layer-llm::before    { background: #2d1b69; border-color: #9f67fa; }
 [data-theme="dark"] .agent-log-layer-google::before { background: #1b3a1e; border-color: #66bb6a; }
+[data-theme="dark"] .agent-log-layer-auth0::before  { background: #2a1f00; border-color: #fbbf24; }
 
 .agent-log-entry-name-row {
     display: flex;
@@ -742,9 +744,11 @@ table tbody tr:hover { background: var(--surface-alt); }
 .agent-log-layer-agent  .agent-log-layer-badge { color: var(--brand-dark); }
 .agent-log-layer-google .agent-log-layer-badge { color: #1b5e20; }
 .agent-log-layer-app    .agent-log-layer-badge { color: var(--muted); }
+.agent-log-layer-auth0  .agent-log-layer-badge { color: #92400e; }
 .agent-log-layer-llm    .agent-log-layer-badge { color: #4527a0; }
 [data-theme="dark"] .agent-log-layer-google .agent-log-layer-badge { color: #a5d6a7; }
 [data-theme="dark"] .agent-log-layer-llm    .agent-log-layer-badge { color: #ce93d8; }
+[data-theme="dark"] .agent-log-layer-auth0  .agent-log-layer-badge { color: #fbbf24; }
 
 /* "→ tool_name" — arrow before the tool name */
 .agent-log-entry:not(.agent-log-reasoning) .agent-log-entry-name::before {

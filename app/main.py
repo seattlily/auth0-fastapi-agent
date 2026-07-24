@@ -1694,7 +1694,7 @@ async def chat_stream(request: Request, response: Response):
                             },
                             "ciba": False,
                             "reasoning": False,
-                            "layer": "app",
+                            "layer": "auth0",
                         }) + "\n\n"
 
                     start_t = time.monotonic()
