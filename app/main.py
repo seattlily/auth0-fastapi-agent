@@ -72,6 +72,7 @@ from tools.auth0_my_account import (
     exchange_code_for_ma_token,
     initiate_connect,
     list_accounts,
+    mint_my_account_token,
 )
 from tools.compasszero import TOOLS as CZ_TOOLS
 from tools.compasszero import dispatch as cz_dispatch
@@ -1911,7 +1912,6 @@ async def connections_authorize(request: Request, response: Response):
         "audience": f"https://{os.environ['AUTH0_DOMAIN']}/me/",
         "scope": CONNECTED_ACCOUNTS_SCOPES,
         "state": state,
-        "prompt": "consent",
     })
     return RedirectResponse(
         url=f"https://{os.environ['AUTH0_DOMAIN']}/authorize?{params}"
@@ -1944,13 +1944,29 @@ async def connections_ma_callback(request: Request, response: Response):
     return RedirectResponse(url="/connections", status_code=303)
 
 
+async def _get_or_refresh_ma_token(request: Request, session: dict | None) -> str:
+    """Return a cached My Account API token or try to mint one via refresh token
+    exchange (guide §Step C / MRRT). Clears the cached token on 401."""
+    ma_token = request.session.get("ma_access_token", "")
+    if ma_token:
+        return ma_token
+    _, refresh_token = _tokens_from_session(session)
+    if refresh_token:
+        try:
+            ma_token = await mint_my_account_token(refresh_token)
+            request.session["ma_access_token"] = ma_token
+        except MyAccountError:
+            pass
+    return ma_token
+
+
 @app.get("/connections")
 async def connections_page(request: Request, response: Response):
     user, session, ctx = await require_login(request, response)
     if not user:
         return RedirectResponse(url="/auth/login")
 
-    ma_token = request.session.get("ma_access_token", "")
+    ma_token = await _get_or_refresh_ma_token(request, session)
 
     accounts: list[dict] = []
     error: str | None = None
@@ -1961,6 +1977,7 @@ async def connections_page(request: Request, response: Response):
             err_str = str(e)
             if "(401)" in err_str:
                 request.session.pop("ma_access_token", None)
+                ma_token = ""
             else:
                 error = err_str
     return templates.TemplateResponse(
@@ -1982,7 +1999,8 @@ async def connections_connect(request: Request, response: Response, connection: 
     if not user:
         return RedirectResponse(url="/auth/login")
 
-    ma_token = request.session.get("ma_access_token", "")
+    from urllib.parse import quote_plus
+    ma_token = await _get_or_refresh_ma_token(request, session)
     if not ma_token:
         return RedirectResponse(url="/connections/authorize", status_code=303)
 
@@ -1994,7 +2012,6 @@ async def connections_connect(request: Request, response: Response, connection: 
     }
     scopes = scopes_for_connection.get(connection)
 
-    from urllib.parse import quote_plus
     try:
         result = await initiate_connect(
             my_account_token=ma_token,
@@ -2014,14 +2031,18 @@ async def connections_connect(request: Request, response: Response, connection: 
         "redirect_uri": redirect_uri,
         "connection": connection,
     }
-    connect_uri = result.get("connect_uri") or result.get("authorize_url")
-    if not connect_uri:
-        from urllib.parse import quote_plus as _qp
-        return RedirectResponse(url=f"/connections?error={_qp('Auth0 did not return a connect URI')}", status_code=303)
+
+    # Guide §Step 2: redirect to /connected-accounts/connect?ticket={ticket}
     ticket = (result.get("connect_params") or {}).get("ticket")
-    if ticket and "ticket=" not in connect_uri:
-        sep = "&" if "?" in connect_uri else "?"
-        connect_uri = f"{connect_uri}{sep}ticket={ticket}"
+    if not ticket:
+        return RedirectResponse(
+            url=f"/connections?error={quote_plus('Auth0 did not return a ticket')}",
+            status_code=303,
+        )
+    connect_uri = (
+        f"https://{os.environ['AUTH0_DOMAIN']}/connected-accounts/connect"
+        f"?ticket={ticket}"
+    )
     return RedirectResponse(url=connect_uri, status_code=303)
 
 
@@ -2068,10 +2089,10 @@ async def connections_complete(request: Request, response: Response):
 async def connections_disconnect(
     request: Request, response: Response, account_id: str
 ):
-    user = await _get_user(request, response)
+    user, session, _ = await require_login(request, response)
     if not user:
         return RedirectResponse(url="/auth/login")
-    ma_token = request.session.get("ma_access_token", "")
+    ma_token = await _get_or_refresh_ma_token(request, session)
     if not ma_token:
         return RedirectResponse(url="/connections/authorize", status_code=303)
     from urllib.parse import quote_plus
