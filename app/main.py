@@ -1540,7 +1540,7 @@ async def chat_stream(request: Request, response: Response):
         yield "data: " + json.dumps({
             "t": "user_turn",
             "message": user_message,
-            "user_name": (user or {}).get("name"),
+            "user_name": (user or {}).get("nickname") or (user or {}).get("name"),
             "user_role": ctx.get("role"),
             "org_name": ctx.get("org_name"),
         }) + "\n\n"
@@ -1552,7 +1552,7 @@ async def chat_stream(request: Request, response: Response):
             "t": "agent_call",
             "id": _AGENT_ID,
             "agent_id": AUTH0_AGENT_ID,
-            "user_name": (user or {}).get("name"),
+            "user_name": (user or {}).get("nickname") or (user or {}).get("name"),
             "user_role": ctx.get("role"),
             "org_name": ctx.get("org_name"),
         }) + "\n\n"
@@ -1640,7 +1640,7 @@ async def chat_stream(request: Request, response: Response):
                         "principal": {
                             "agent_id": AUTH0_AGENT_ID,
                             "user_sub": ctx.get("sub"),
-                            "user_name": (user or {}).get("name"),
+                            "user_name": (user or {}).get("nickname") or (user or {}).get("name"),
                             "user_role": ctx.get("role"),
                             "org_name": ctx.get("org_name"),
                         },
@@ -1667,10 +1667,28 @@ async def chat_stream(request: Request, response: Response):
                             "principal": {
                                 "agent_id": AUTH0_AGENT_ID,
                                 "user_sub": ctx.get("sub"),
-                                "user_name": (user or {}).get("name"),
+                                "user_name": (user or {}).get("nickname") or (user or {}).get("name"),
                                 "user_role": ctx.get("role"),
                                 "org_name": ctx.get("org_name"),
                             },
+                        }) + "\n\n"
+
+                    # Emit a visible sub-step for the Auth0 CIBA bc-authorize request
+                    ciba_call_id = None
+                    ciba_sub_start = None
+                    if name in CIBA_GATED_CHAT_TOOLS:
+                        ciba_call_id = f"ciba_{tc['id']}"
+                        ciba_sub_start = time.monotonic()
+                        yield "data: " + json.dumps({
+                            "t": "tool_call",
+                            "id": ciba_call_id,
+                            "name": "ciba_bc_authorize",
+                            "args": {
+                                "binding_message": args.get("binding_message") or name,
+                            },
+                            "ciba": False,
+                            "reasoning": False,
+                            "layer": "app",
                         }) + "\n\n"
 
                     start_t = time.monotonic()
@@ -1691,6 +1709,22 @@ async def chat_stream(request: Request, response: Response):
                             "ok": not tv_scope_error,
                             "ms": tv_elapsed,
                             "summary": "Missing scope — needs authorization" if tv_scope_error else "Access token issued",
+                        }) + "\n\n"
+
+                    # Resolve the CIBA sub-step
+                    if ciba_call_id is not None:
+                        ciba_elapsed = int((time.monotonic() - ciba_sub_start) * 1000) if ciba_sub_start else elapsed_ms
+                        try:
+                            _ciba_parsed = json.loads(result)
+                            ciba_denied = isinstance(_ciba_parsed, dict) and "error" in _ciba_parsed
+                        except Exception:
+                            ciba_denied = False
+                        yield "data: " + json.dumps({
+                            "t": "tool_result",
+                            "id": ciba_call_id,
+                            "ok": not ciba_denied,
+                            "ms": ciba_elapsed,
+                            "summary": "Denied or timed out" if ciba_denied else "Approved",
                         }) + "\n\n"
 
                     is_error = False
@@ -1980,9 +2014,15 @@ async def connections_connect(request: Request, response: Response, connection: 
         "redirect_uri": redirect_uri,
         "connection": connection,
     }
+    connect_uri = result.get("connect_uri") or result.get("authorize_url")
+    if not connect_uri:
+        from urllib.parse import quote_plus as _qp
+        return RedirectResponse(url=f"/connections?error={_qp('Auth0 did not return a connect URI')}", status_code=303)
     ticket = (result.get("connect_params") or {}).get("ticket")
-    connect_uri = result.get("connect_uri")
-    return RedirectResponse(url=f"{connect_uri}?ticket={ticket}", status_code=303)
+    if ticket and "ticket=" not in connect_uri:
+        sep = "&" if "?" in connect_uri else "?"
+        connect_uri = f"{connect_uri}{sep}ticket={ticket}"
+    return RedirectResponse(url=connect_uri, status_code=303)
 
 
 @app.get("/connections/callback")

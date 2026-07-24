@@ -834,6 +834,12 @@ table tbody tr:hover { background: var(--surface-alt); }
     padding-left: 0.5rem;
 }
 .agent-log-substep::before { display: none; }
+.agent-log-substep-ciba {
+    border-left-color: #f59e0b;
+}
+[data-theme="dark"] .agent-log-substep-ciba {
+    border-left-color: #fbbf24;
+}
 @keyframes ciba-dot-pulse {
     0%, 100% { box-shadow: 0 0 0 0 rgba(245, 158, 11, 0); }
     50%       { box-shadow: 0 0 0 4px rgba(245, 158, 11, 0.28); }
@@ -841,6 +847,32 @@ table tbody tr:hover { background: var(--surface-alt); }
 @keyframes ciba-pulse {
     0%, 100% { box-shadow: 0 0 0 0 rgba(245, 158, 11, 0); }
     50% { box-shadow: 0 0 0 4px rgba(245, 158, 11, 0.18); }
+}
+
+/* Active (currently running) step */
+.agent-log-entry.agent-log-active {
+    background: color-mix(in srgb, var(--brand-soft) 40%, transparent);
+    border-radius: var(--radius-sm);
+    padding-right: 0.3rem;
+    margin-right: 0.25rem;
+}
+.agent-log-entry.agent-log-active::before {
+    animation: step-dot-pulse 1.4s ease-in-out infinite;
+}
+.agent-log-layer-google.agent-log-active::before {
+    animation: step-dot-pulse-green 1.4s ease-in-out infinite;
+}
+@keyframes step-dot-pulse {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(67, 97, 238, 0); }
+    50%       { box-shadow: 0 0 0 5px rgba(67, 97, 238, 0.22); }
+}
+@keyframes step-dot-pulse-green {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(46, 125, 50, 0); }
+    50%       { box-shadow: 0 0 0 5px rgba(46, 125, 50, 0.22); }
+}
+/* Spine tints to brand while steps are running */
+.agent-log-entries.has-active::before {
+    background: linear-gradient(to bottom, var(--brand) 0%, var(--border-soft) 65%);
 }
 
 /* ---------- chat CIBA approval banner ---------- */

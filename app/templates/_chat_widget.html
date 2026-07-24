@@ -478,6 +478,16 @@ document.querySelectorAll('.message.assistant .content').forEach((el) => {
     // Track LLM accumulation per agent turn
     const _agentLlmState = {};  // agentId → {calls, totalMs}
 
+    function _setActiveEntry(entry) {
+        logEntries.querySelectorAll('.agent-log-active').forEach(el => el.classList.remove('agent-log-active'));
+        if (entry) {
+            entry.classList.add('agent-log-active');
+            logEntries.classList.add('has-active');
+        } else {
+            logEntries.classList.remove('has-active');
+        }
+    }
+
     function addAgentEntry(msg) {
         if (!logEntries) return;
         const empty = document.getElementById('agent-log-empty');
@@ -527,7 +537,7 @@ document.querySelectorAll('.message.assistant .content').forEach((el) => {
         entry.appendChild(statusEl);
 
         logEntries.appendChild(entry);
-        if (!restoring) logEntries.scrollTop = logEntries.scrollHeight;
+        if (!restoring) { _setActiveEntry(entry); logEntries.scrollTop = logEntries.scrollHeight; }
     }
 
     function onLlmCall(agentId) {
@@ -582,8 +592,10 @@ document.querySelectorAll('.message.assistant .content').forEach((el) => {
 
         const _FRIENDLY_NAMES = {
             token_vault_exchange: 'POST /oauth/token',
+            ciba_bc_authorize:    'POST /bc-authorize',
         };
         const isTokenVaultStep = name === 'token_vault_exchange';
+        const isCibaSubstep    = name === 'ciba_bc_authorize';
         const displayName = reasoning ? 'Reasoning' : (_FRIENDLY_NAMES[name] || name);
         if (displayName) {
             const nameEl = document.createElement('span');
@@ -592,7 +604,8 @@ document.querySelectorAll('.message.assistant .content').forEach((el) => {
             nameRow.appendChild(nameEl);
         }
         entry.appendChild(nameRow);
-        if (isTokenVaultStep) entry.classList.add('agent-log-substep');
+        if (isTokenVaultStep || isCibaSubstep) entry.classList.add('agent-log-substep');
+        if (isCibaSubstep) entry.classList.add('agent-log-substep-ciba');
 
         if (reasoning) {
             const text = (args && args.reasoning) ? args.reasoning : '';
@@ -620,11 +633,13 @@ document.querySelectorAll('.message.assistant .content').forEach((el) => {
                 ? '<span class="agent-log-spinner agent-log-spinner-ciba"></span> Waiting for device approval…'
                 : isTokenVaultStep
                     ? '<span class="agent-log-spinner"></span> Exchanging token…'
-                    : '<span class="agent-log-spinner"></span> Running…');
+                    : isCibaSubstep
+                        ? '<span class="agent-log-spinner agent-log-spinner-ciba"></span> Waiting for Guardian push…'
+                        : '<span class="agent-log-spinner"></span> Running…');
         entry.appendChild(statusEl);
 
         logEntries.appendChild(entry);
-        if (!restoring) logEntries.scrollTop = logEntries.scrollHeight;
+        if (!restoring) { _setActiveEntry(entry); logEntries.scrollTop = logEntries.scrollHeight; }
 
         if (ciba) {
             cibaActiveIds.add(id);
@@ -646,6 +661,8 @@ document.querySelectorAll('.message.assistant .content').forEach((el) => {
         if (summary) text += ' — ' + summary;
         statusEl.textContent = text;
         entry.classList.remove('agent-log-ciba');
+        entry.classList.remove('agent-log-active');
+        if (!logEntries.querySelector('.agent-log-active')) logEntries.classList.remove('has-active');
 
         if (entry.dataset.ciba) {
             cibaActiveIds.delete(id);
@@ -662,6 +679,8 @@ document.querySelectorAll('.message.assistant .content').forEach((el) => {
         if (!statusEl) return;
         statusEl.className = 'agent-log-entry-status agent-log-done';
         statusEl.textContent = '✓ ' + ms + 'ms';
+        entry.classList.remove('agent-log-active');
+        if (!logEntries.querySelector('.agent-log-active')) logEntries.classList.remove('has-active');
     }
 
     // CIBA inline chat message
