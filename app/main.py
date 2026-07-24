@@ -711,10 +711,15 @@ async def require_login(request: Request, response: Response) -> tuple[dict, dic
     # Per-user app-state isolation: Starlette's SessionMiddleware cookie
     # is independent of the SDK's session, so app state (conversation,
     # pending_connect, cached org memberships) survives a logout. Reset
-    # whenever the signed-in user changes.
+    # on user switch or on a new Auth0 login session (sid change).
     sub = (user or {}).get("sub") or ""
-    if request.session.get("conversation_owner") != sub:
+    auth_sid = access_claims.get("sid") or ""
+    if (
+        request.session.get("conversation_owner") != sub
+        or (auth_sid and request.session.get("last_auth_sid") != auth_sid)
+    ):
         request.session["conversation_owner"] = sub
+        request.session["last_auth_sid"] = auth_sid
         request.session["conversation"] = []
         request.session.pop("pending_connect", None)
         request.session.pop("user_organizations", None)
