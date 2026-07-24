@@ -64,16 +64,8 @@ from tools.auth0_management import (
     reconcile_companies_with_auth0,
     sync_status,
 )
-from tools.auth0_my_account import (
-    CONNECTED_ACCOUNTS_SCOPES,
-    MyAccountError,
-    complete_connect,
-    delete_account,
-    exchange_code_for_ma_token,
-    initiate_connect,
-    list_accounts,
-    mint_my_account_token,
-)
+from auth0_server_python.auth_types import ConnectAccountOptions
+from auth0_server_python.error import Auth0Error
 from tools.compasszero import TOOLS as CZ_TOOLS
 from tools.compasszero import dispatch as cz_dispatch
 from tools.compasszero import visible_schemas as cz_visible_schemas
@@ -722,21 +714,22 @@ async def require_login(request: Request, response: Response) -> tuple[dict, dic
         request.session["last_auth_sid"] = auth_sid
         request.session["conversation"] = []
         request.session.pop("pending_connect", None)
-        request.session.pop("user_organizations", None)
+        request.session.pop("google_connected", None)
 
-    # Multi-org membership lookup — only meaningful when the current
-    # token carries org_id context. Skipping it when org_id is absent
-    # prevents the top-nav switcher from appearing (and triggering a
-    # re-login with organization=) after the tenant removes the org
-    # login requirement.
-    if user and ctx.get("org_id") and "user_organizations" not in request.session:
+    # Multi-org membership lookup — always fetch fresh so the switcher
+    # disappears immediately when the user is removed from the org on
+    # the Auth0 tenant (no stale session cache).
+    ctx["user_organizations"] = []
+    if user and ctx.get("org_id"):
         try:
-            request.session["user_organizations"] = (
-                await list_user_organizations(sub) if sub else []
-            )
+            orgs = await list_user_organizations(sub) if sub else []
         except ManagementError:
-            request.session["user_organizations"] = []
-    ctx["user_organizations"] = request.session.get("user_organizations", []) or []
+            orgs = []
+        if any(o.get("id") == ctx["org_id"] for o in orgs):
+            ctx["user_organizations"] = orgs
+        else:
+            ctx.pop("org_id", None)
+            ctx.pop("org_name", None)
 
     return user, session, ctx
 
@@ -1489,6 +1482,15 @@ async def dispatch_any_tool(name: str, args: dict, ctx: dict, refresh_token: str
                     )
                 }
             )
+        if not ctx.get("google_connected"):
+            return json.dumps({
+                "error": "no_google_connection",
+                "detail": (
+                    "No Google account connected. Visit /connections to link "
+                    "your Google account and enable calendar and email tools."
+                ),
+                "authorize_url": "/connections",
+            })
         try:
             return await dispatch_google_tool(name, args, refresh_token)
         except TokenVaultError as e:
@@ -1533,6 +1535,25 @@ async def chat_stream(request: Request, response: Response):
 
     access_token, refresh_token = _tokens_from_session(session)
     conversation = request.session.get("conversation", [])
+
+    # Determine if the user has Google Token Vault access, cached per session.
+    # Primary google-oauth2 users always have implicit access.
+    # Others need an explicit connected account from /connections.
+    sub = (user or {}).get("sub") or ""
+    if "google_connected" not in request.session:
+        if sub.startswith("google-oauth2|"):
+            request.session["google_connected"] = True
+        else:
+            try:
+                _gc_result = await auth_client.client.list_connected_accounts(
+                    store_options=_store_options(request, response),
+                )
+                request.session["google_connected"] = any(
+                    acc.connection == "google-oauth2" for acc in _gc_result.accounts
+                )
+            except Auth0Error:
+                request.session["google_connected"] = False
+    ctx["google_connected"] = request.session.get("google_connected", False)
 
     tool_schemas = [THINK_TOOL_SCHEMA] + cz_visible_schemas(ctx) + visible_google_schemas(ctx)
 
@@ -1885,108 +1906,30 @@ async def mfa_enroll(request: Request, response: Response):
     )
 
 
-# ---------- connections (My Account API) ----------
+# ---------- connections (My Account API via auth0_server_python SDK) ----------
 #
-# Getting a valid My Account API token requires a dedicated OAuth flow with
-# audience=https://{domain}/me/ — exchanging the main app's refresh token
-# doesn't work when AUTH0_AUDIENCE is set to a different API. Auth0
-# audience-locks the refresh token at login; the exchange silently returns
-# the original token (wrong aud, no connected_accounts scopes) and the
-# My Account API rejects it with HTTP 401. See AUTH0_SETUP.md §3 and §7.4.
-#
-# Flow:
-#   1. /connections/authorize  → Auth0 /authorize?audience=.../me/&prompt=consent
-#   2. /connections/ma-callback → exchange code, store token in Starlette session
-#   3. All connections routes read request.session["ma_access_token"] directly.
-#
-# Session store note: ma_access_token lives in Starlette's request.session
-# (cookie-based), NOT in the Auth0 SDK session returned by require_login().
-# Always use request.session.get("ma_access_token") here, never session.get(...).
-
-
-@app.get("/connections/authorize")
-async def connections_authorize(request: Request, response: Response):
-    user = await _get_user(request, response)
-    if not user:
-        return RedirectResponse(url="/auth/login")
-    state = secrets.token_urlsafe(24)
-    request.session["ma_oauth_state"] = state
-    from urllib.parse import urlencode
-    params = urlencode({
-        "response_type": "code",
-        "client_id": os.environ["AUTH0_CLIENT_ID"],
-        "redirect_uri": str(request.url_for("connections_ma_callback")),
-        "audience": f"https://{os.environ['AUTH0_DOMAIN']}/me/",
-        "scope": CONNECTED_ACCOUNTS_SCOPES,
-        "state": state,
-    })
-    return RedirectResponse(
-        url=f"https://{os.environ['AUTH0_DOMAIN']}/authorize?{params}"
-    )
-
-
-@app.get("/connections/ma-callback", name="connections_ma_callback")
-async def connections_ma_callback(request: Request, response: Response):
-    from urllib.parse import quote_plus
-    # Auth0 error response (e.g. access_denied, Service not found)
-    auth_error = request.query_params.get("error")
-    if auth_error:
-        request.session.pop("ma_oauth_state", None)
-        desc = request.query_params.get("error_description", auth_error)
-        return RedirectResponse(url=f"/connections?error={quote_plus(desc)}", status_code=303)
-
-    code = request.query_params.get("code")
-    state = request.query_params.get("state")
-    stored_state = request.session.pop("ma_oauth_state", None)
-    if not code or state != stored_state:
-        return RedirectResponse(url="/connections?error=oauth+state+mismatch", status_code=303)
-    try:
-        token = await exchange_code_for_ma_token(
-            code=code,
-            redirect_uri=str(request.url_for("connections_ma_callback")),
-        )
-    except MyAccountError as e:
-        return RedirectResponse(url=f"/connections?error={quote_plus(str(e))}", status_code=303)
-    request.session["ma_access_token"] = token
-    return RedirectResponse(url="/connections", status_code=303)
-
-
-async def _get_or_refresh_ma_token(request: Request, session: dict | None) -> str:
-    """Return a cached My Account API token or try to mint one via refresh token
-    exchange (guide §Step C / MRRT). Clears the cached token on 401."""
-    ma_token = request.session.get("ma_access_token", "")
-    if ma_token:
-        return ma_token
-    _, refresh_token = _tokens_from_session(session)
-    if refresh_token:
-        try:
-            ma_token = await mint_my_account_token(refresh_token)
-            request.session["ma_access_token"] = ma_token
-        except MyAccountError:
-            pass
-    return ma_token
+# The SDK's ServerClient handles the My Account API token exchange internally
+# via get_access_token(audience=.../me/, scope=...). No separate re-auth flow
+# is needed — the SDK uses the stored refresh token from the main login session.
 
 
 @app.get("/connections")
 async def connections_page(request: Request, response: Response):
+    from urllib.parse import quote_plus
     user, session, ctx = await require_login(request, response)
     if not user:
         return RedirectResponse(url="/auth/login")
 
-    ma_token = await _get_or_refresh_ma_token(request, session)
-
-    accounts: list[dict] = []
+    accounts: list = []
     error: str | None = None
-    if ma_token:
-        try:
-            accounts = await list_accounts(ma_token)
-        except MyAccountError as e:
-            err_str = str(e)
-            if "(401)" in err_str:
-                request.session.pop("ma_access_token", None)
-                ma_token = ""
-            else:
-                error = err_str
+    try:
+        result = await auth_client.client.list_connected_accounts(
+            store_options=_store_options(request, response)
+        )
+        accounts = result.accounts
+    except Auth0Error as e:
+        error = str(e)
+
     return templates.TemplateResponse(
         request=request,
         name="connections.html",
@@ -2002,64 +1945,32 @@ async def connections_page(request: Request, response: Response):
 
 @app.post("/connections/connect/{connection}")
 async def connections_connect(request: Request, response: Response, connection: str):
+    from urllib.parse import quote_plus
     user, session, ctx = await require_login(request, response)
     if not user:
         return RedirectResponse(url="/auth/login")
 
-    from urllib.parse import quote_plus
-    ma_token = await _get_or_refresh_ma_token(request, session)
-    if not ma_token:
-        return RedirectResponse(url="/connections/authorize", status_code=303)
-
-    redirect_uri = str(request.url_for("connections_callback"))
-    state = secrets.token_urlsafe(24)
-
-    scopes_for_connection = {
+    scopes_for_connection: dict[str, list[str]] = {
         "google-oauth2": ["openid", *GOOGLE_CONNECTION_SCOPES],
     }
-    scopes = scopes_for_connection.get(connection)
-
-    try:
-        result = await initiate_connect(
-            my_account_token=ma_token,
-            connection=connection,
-            redirect_uri=redirect_uri,
-            state=state,
-            scopes=scopes,
-        )
-    except MyAccountError as e:
-        err_str = str(e)
-        if "(401)" in err_str:
-            # Cached token has wrong audience or expired — clear it and
-            # send the user through the explicit code flow to get a real MA token.
-            request.session.pop("ma_access_token", None)
-            return RedirectResponse(url="/connections/authorize", status_code=303)
-        return RedirectResponse(
-            url=f"/connections?error={quote_plus(err_str)}", status_code=303
-        )
-
-    request.session["pending_connect"] = {
-        "auth_session": result.get("auth_session"),
-        "state": state,
-        "redirect_uri": redirect_uri,
-        "connection": connection,
-    }
-
-    # Guide §Step 2: redirect to /connected-accounts/connect?ticket={ticket}
-    ticket = (result.get("connect_params") or {}).get("ticket")
-    if not ticket:
-        return RedirectResponse(
-            url=f"/connections?error={quote_plus('Auth0 did not return a ticket')}",
-            status_code=303,
-        )
-    connect_uri = (
-        f"https://{os.environ['AUTH0_DOMAIN']}/connected-accounts/connect"
-        f"?ticket={ticket}"
+    options = ConnectAccountOptions(
+        connection=connection,
+        redirect_uri=str(request.url_for("connections_callback")),
+        scopes=scopes_for_connection.get(connection),
     )
-    return RedirectResponse(url=connect_uri, status_code=303)
+    try:
+        connect_url = await auth_client.client.start_connect_account(
+            options=options,
+            store_options=_store_options(request, response),
+        )
+    except Auth0Error as e:
+        return RedirectResponse(
+            url=f"/connections?error={quote_plus(str(e))}", status_code=303
+        )
+    return RedirectResponse(url=connect_url, status_code=303)
 
 
-@app.get("/connections/callback")
+@app.get("/connections/callback", name="connections_callback")
 async def connections_callback(request: Request):
     return templates.TemplateResponse(
         request=request, name="connections_callback.html", context={}
@@ -2074,27 +1985,22 @@ async def connections_complete(request: Request, response: Response):
     body = await request.json()
     connect_code = (body.get("connect_code") or "").strip()
     state = (body.get("state") or "").strip()
-    if not connect_code:
-        return JSONResponse({"error": "missing connect_code"}, status_code=400)
-    pending = request.session.get("pending_connect") or {}
-    if not pending:
-        return JSONResponse({"error": "no pending connect in session"}, status_code=400)
-    if state and pending.get("state") and state != pending["state"]:
-        return JSONResponse({"error": "state mismatch"}, status_code=400)
-    ma_token = request.session.get("ma_access_token", "")
-    if not ma_token:
-        return JSONResponse({"error": "My Account session expired; visit /connections to re-authorize"}, status_code=401)
+    if not connect_code or not state:
+        return JSONResponse({"error": "missing connect_code or state"}, status_code=400)
+
+    from urllib.parse import urlencode
+    callback_url = (
+        str(request.url_for("connections_callback"))
+        + "?" + urlencode({"connect_code": connect_code, "state": state})
+    )
     try:
-        await complete_connect(
-            my_account_token=ma_token,
-            auth_session=pending["auth_session"],
-            connect_code=connect_code,
-            redirect_uri=pending["redirect_uri"],
+        await auth_client.client.complete_connect_account(
+            url=callback_url,
+            store_options=_store_options(request, response),
         )
-    except MyAccountError as e:
-        request.session.pop("pending_connect", None)
+    except Auth0Error as e:
         return JSONResponse({"error": str(e)}, status_code=400)
-    request.session.pop("pending_connect", None)
+    request.session.pop("google_connected", None)
     return JSONResponse({"ok": True})
 
 
@@ -2102,19 +2008,20 @@ async def connections_complete(request: Request, response: Response):
 async def connections_disconnect(
     request: Request, response: Response, account_id: str
 ):
+    from urllib.parse import quote_plus
     user, session, _ = await require_login(request, response)
     if not user:
         return RedirectResponse(url="/auth/login")
-    ma_token = await _get_or_refresh_ma_token(request, session)
-    if not ma_token:
-        return RedirectResponse(url="/connections/authorize", status_code=303)
-    from urllib.parse import quote_plus
     try:
-        await delete_account(ma_token, account_id)
-    except MyAccountError as e:
+        await auth_client.client.delete_connected_account(
+            connected_account_id=account_id,
+            store_options=_store_options(request, response),
+        )
+    except Auth0Error as e:
         return RedirectResponse(
             url=f"/connections?error={quote_plus(str(e))}", status_code=303
         )
+    request.session.pop("google_connected", None)
     return RedirectResponse(url="/connections?success=disconnected", status_code=303)
 
 
