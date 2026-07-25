@@ -369,6 +369,8 @@ _auth0_kwargs = {
     "app_base_url": os.environ.get("APP_BASE_URL", "http://localhost:8000"),
     "secret": os.environ["APP_SECRET_KEY"],
     "authorization_params": {
+        # No audience — keeps the refresh token unlocked so the SDK can exchange it
+        # for the My Account API (/me/) needed by connected-accounts endpoints.
         "scope": (
             "openid profile email offline_access "
             "create:me:connected_accounts "
@@ -377,8 +379,6 @@ _auth0_kwargs = {
         ),
     },
 }
-if os.environ.get("AUTH0_AUDIENCE"):
-    _auth0_kwargs["audience"] = os.environ["AUTH0_AUDIENCE"]
 
 auth0_config = Auth0Config(**_auth0_kwargs)
 auth_client = AuthClient(auth0_config)
