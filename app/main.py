@@ -813,6 +813,15 @@ def build_system_prompt(user: dict | None, ctx: dict) -> str:
         "prompt the user to approve on their device, then the booking is "
         "confirmed immediately. After a successful booking, tell the user "
         "their trip is confirmed — do NOT say it needs agent review.\n\n"
+        "RULE — adding trips/flights to Google Calendar: when the user asks "
+        "to add a trip, flight, or booking to their calendar, ALWAYS call "
+        "get_trip_details first to get the departure date, return date, "
+        "origin, destination, and other details. Use those values directly "
+        "— never ask the user when to schedule the event. Use "
+        "'Flight: {origin} → {destination}' as the summary, depart_date "
+        "at 00:00 local time as start, and return_date at 23:59 as end "
+        "(or adjust to all-day format). If no trip ID is known, call "
+        "list_my_trips or the appropriate list tool to find it first.\n\n"
         "Google tool authorization: Calendar and Gmail tools require the "
         "user to have connected their Google account via Token Vault. If a "
         "Google tool returns error='missing_google_scope', the user hasn't "
@@ -2016,11 +2025,7 @@ async def connections_connect(request: Request, response: Response, connection: 
     if not ma_token:
         return RedirectResponse(url="/connections/authorize", status_code=303)
 
-    form = await request.form()
-    selected_scopes = list(form.getlist("scope"))
-    if not selected_scopes:
-        return RedirectResponse(url="/connections?error=Select+at+least+one+scope", status_code=303)
-    scopes = ["openid", *selected_scopes]
+    scopes = ["openid", *GOOGLE_CONNECTION_SCOPES]
 
     state = secrets.token_urlsafe(16)
     redirect_uri = str(request.url_for("connections_callback"))

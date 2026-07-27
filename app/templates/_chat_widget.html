@@ -162,7 +162,7 @@ document.querySelectorAll('.message.assistant .content').forEach((el) => {
             } else if (e.t === 'llm_done') {
                 onLlmDone(e.agent_id, e.ms);
             } else if (e.t === 'tool_call') {
-                addLogEntry(e.id, e.name, e.args, e.ciba, e.reasoning, e.layer);
+                addLogEntry(e.id, e.name, e.args, e.ciba, e.reasoning, e.layer, e.agent_id || null);
             } else if (e.t === 'tool_result') {
                 updateLogEntry(e.id, e.ok, e.ms, e.summary);
             }
@@ -564,7 +564,7 @@ document.querySelectorAll('.message.assistant .content').forEach((el) => {
         }
     }
 
-    function addLogEntry(id, name, args, ciba, reasoning, layer) {
+    function addLogEntry(id, name, args, ciba, reasoning, layer, agentId) {
         if (!logEntries) return;
         const empty = document.getElementById('agent-log-empty');
         if (empty) empty.remove();
@@ -588,7 +588,9 @@ document.querySelectorAll('.message.assistant .content').forEach((el) => {
 
         const badge = document.createElement('span');
         badge.className = 'agent-log-layer-badge';
-        badge.textContent = meta.icon + ' ' + meta.label;
+        let badgeLabel = meta.icon + ' ' + meta.label;
+        if (layer === 'agent' && agentId) badgeLabel += ' · ' + agentId;
+        badge.textContent = badgeLabel;
         nameRow.appendChild(badge);
 
         const _FRIENDLY_NAMES = {
@@ -773,8 +775,9 @@ document.querySelectorAll('.message.assistant .content').forEach((el) => {
                             logEvents.push({t: 'llm_done', id: msg.id, agent_id: msg.agent_id, ms: msg.ms, has_tools: msg.has_tools});
                             saveLogEvents();
                         } else if (msg.t === 'tool_call') {
-                            addLogEntry(msg.id, msg.name, msg.args, msg.ciba, msg.reasoning, msg.layer);
-                            logEvents.push({t: 'tool_call', id: msg.id, name: msg.name, args: msg.args, ciba: msg.ciba, reasoning: msg.reasoning, layer: msg.layer});
+                            const _tcAgentId = (msg.principal && msg.principal.agent_id) || null;
+                            addLogEntry(msg.id, msg.name, msg.args, msg.ciba, msg.reasoning, msg.layer, _tcAgentId);
+                            logEvents.push({t: 'tool_call', id: msg.id, name: msg.name, args: msg.args, ciba: msg.ciba, reasoning: msg.reasoning, layer: msg.layer, agent_id: _tcAgentId});
                             saveLogEvents();
                         } else if (msg.t === 'tool_result') {
                             updateLogEntry(msg.id, msg.ok, msg.ms, msg.summary);
