@@ -65,7 +65,7 @@ from tools.auth0_management import (
     sync_status,
 )
 from auth0_server_python.auth_types import ConnectAccountOptions
-from auth0_server_python.error import Auth0Error
+from auth0_server_python.error import AccessTokenError, Auth0Error, MyAccountApiError
 from tools.compasszero import TOOLS as CZ_TOOLS
 from tools.compasszero import dispatch as cz_dispatch
 from tools.compasszero import visible_schemas as cz_visible_schemas
@@ -1927,6 +1927,15 @@ async def connections_page(request: Request, response: Response):
             store_options=_store_options(request, response)
         )
         accounts = result.accounts
+    except AccessTokenError:
+        # Stale or invalid refresh token — clear the session and re-authenticate.
+        return RedirectResponse(url="/auth/logout", status_code=303)
+    except MyAccountApiError as e:
+        if e.status == 401:
+            # Auth0 rejected the token — likely an audience-locked session.
+            # Force a fresh login so the user gets an unlocked refresh token.
+            return RedirectResponse(url="/auth/logout", status_code=303)
+        error = str(e)
     except Auth0Error as e:
         error = str(e)
 
