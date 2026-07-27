@@ -1201,8 +1201,15 @@ table tbody tr:hover { background: var(--surface-alt); }
     margin-top: auto;
     padding-top: 0.5rem;
 }
-.provider-actions form { margin: 0; }
+.provider-actions form { margin: 0; width: 100%; }
 .provider-actions .btn { width: 100%; border-radius: var(--radius-pill); }
+
+.scope-picker { display: flex; flex-direction: column; gap: 0.45rem; margin-bottom: 0.1rem; }
+.scope-picker-label { font-size: 0.75rem; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 0.1rem; }
+.scope-option { display: flex; align-items: flex-start; gap: 0.5rem; cursor: pointer; padding: 0.4rem 0.55rem; border-radius: var(--radius); background: var(--surface-alt); border: 1px solid var(--border); }
+.scope-option input[type="checkbox"] { margin-top: 0.1rem; flex-shrink: 0; accent-color: var(--primary); }
+.scope-option-label { font-size: 0.85rem; font-weight: 500; color: var(--text); line-height: 1.2; }
+.scope-option-desc { display: block; font-size: 0.75rem; color: var(--muted); margin-top: 0.1rem; }
 
 /* ---------- detail layouts ---------- */
 

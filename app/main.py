@@ -1548,15 +1548,18 @@ async def chat_stream(request: Request, response: Response):
         if sub.startswith("google-oauth2|"):
             request.session["google_connected"] = True
         else:
-            try:
-                _gc_result = await auth_client.client.list_connected_accounts(
-                    store_options=_store_options(request, response),
-                )
-                request.session["google_connected"] = any(
-                    acc.connection == "google-oauth2" for acc in _gc_result.accounts
-                )
-            except Auth0Error:
-                request.session["google_connected"] = False
+            ma_tok = request.session.get("ma_access_token")
+            if ma_tok:
+                try:
+                    _accounts = await ma_list_accounts(ma_tok)
+                    request.session["google_connected"] = any(
+                        a.get("connection") == "google-oauth2" for a in _accounts
+                    )
+                except MyAccountError:
+                    request.session["google_connected"] = False
+            else:
+                # No MA token yet — optimistic: let Token Vault decide at tool-call time.
+                request.session["google_connected"] = True
     ctx["google_connected"] = request.session.get("google_connected", False)
 
     tool_schemas = [THINK_TOOL_SCHEMA] + cz_visible_schemas(ctx) + visible_google_schemas(ctx)
@@ -2013,18 +2016,21 @@ async def connections_connect(request: Request, response: Response, connection: 
     if not ma_token:
         return RedirectResponse(url="/connections/authorize", status_code=303)
 
+    form = await request.form()
+    selected_scopes = list(form.getlist("scope"))
+    if not selected_scopes:
+        return RedirectResponse(url="/connections?error=Select+at+least+one+scope", status_code=303)
+    scopes = ["openid", *selected_scopes]
+
     state = secrets.token_urlsafe(16)
     redirect_uri = str(request.url_for("connections_callback"))
-    scopes_for_connection: dict[str, list[str]] = {
-        "google-oauth2": ["openid", *GOOGLE_CONNECTION_SCOPES],
-    }
     try:
         result = await initiate_connect(
             my_account_token=ma_token,
             connection=connection,
             redirect_uri=redirect_uri,
             state=state,
-            scopes=scopes_for_connection.get(connection),
+            scopes=scopes,
         )
     except MyAccountError as e:
         err_str = str(e)
