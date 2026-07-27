@@ -81,6 +81,7 @@ from tools.google_calendar import (
     create_calendar_event,
     list_upcoming_calendar_events,
 )
+from tools.obo import OBO_TOOL_SCHEMA, OBOError, get_obo_token
 from tools.auth0_my_account import (
     CONNECTED_ACCOUNTS_SCOPES,
     MyAccountError,
@@ -1480,9 +1481,17 @@ async def chat_page(request: Request, response: Response):
     )
 
 
-async def dispatch_any_tool(name: str, args: dict, ctx: dict, refresh_token: str) -> str:
+async def dispatch_any_tool(name: str, args: dict, ctx: dict, refresh_token: str, access_token: str = "") -> str:
     if name == "think":
         return json.dumps({"ok": True})
+    if name == "obo_token_exchange":
+        audience = args.get("audience", "")
+        scope = args.get("scope", "")
+        try:
+            obo_tok = await get_obo_token(access_token, audience, scope)
+            return json.dumps({"access_token": obo_tok, "audience": audience})
+        except OBOError as e:
+            return json.dumps({"error": str(e)})
     if name in CZ_TOOLS:
         return await cz_dispatch(name, args, ctx)
     if name in GOOGLE_TOOLS_BY_NAME:
@@ -1571,7 +1580,7 @@ async def chat_stream(request: Request, response: Response):
                 request.session["google_connected"] = True
     ctx["google_connected"] = request.session.get("google_connected", False)
 
-    tool_schemas = [THINK_TOOL_SCHEMA] + cz_visible_schemas(ctx) + visible_google_schemas(ctx)
+    tool_schemas = [THINK_TOOL_SCHEMA] + cz_visible_schemas(ctx) + visible_google_schemas(ctx) + [OBO_TOOL_SCHEMA]
 
     messages = (
         [{"role": "system", "content": build_system_prompt(user, ctx)}]
@@ -1718,6 +1727,63 @@ async def chat_stream(request: Request, response: Response):
                             },
                         }) + "\n\n"
 
+                    # Auth0 OBO — fires automatically for every CZ tool call so the
+                    # agent's identity (AUTH0_AGENT_ID) is recorded as the actor in the
+                    # delegation chain, or explicitly when the LLM calls obo_token_exchange.
+                    _auto_obo = (
+                        name in CZ_TOOLS
+                        and bool(access_token)
+                        and bool(AUTH0_AGENT_ID)
+                        and bool(os.environ.get("AUTH0_AUDIENCE"))
+                    )
+                    _explicit_obo = name == "obo_token_exchange"
+                    obo_call_id = None
+                    obo_start = None
+                    _auto_obo_ok = False
+                    _obo_audience = (
+                        os.environ.get("AUTH0_AUDIENCE", "") if _auto_obo
+                        else args.get("audience", "")
+                    )
+                    _obo_scope = "" if _auto_obo else args.get("scope", "")
+
+                    if (_auto_obo or _explicit_obo) and access_token:
+                        obo_call_id = f"obo_{tc['id']}"
+                        obo_start = time.monotonic()
+                        _obo_args: dict = {
+                            "audience": _obo_audience,
+                            "grant": "urn:ietf:params:oauth:grant-type:token-exchange",
+                        }
+                        if _obo_scope:
+                            _obo_args["scope"] = _obo_scope
+                        if _auto_obo:
+                            _obo_args["for"] = name
+                        yield "data: " + json.dumps({
+                            "t": "tool_call",
+                            "id": obo_call_id,
+                            "name": "obo_token_exchange",
+                            "args": _obo_args,
+                            "ciba": False,
+                            "reasoning": False,
+                            "layer": "auth0",
+                            "principal": {
+                                "agent_id": AUTH0_AGENT_ID,
+                                "user_sub": ctx.get("sub"),
+                                "user_name": (user or {}).get("nickname") or (user or {}).get("name"),
+                                "user_role": ctx.get("role"),
+                                "org_name": ctx.get("org_name"),
+                            },
+                        }) + "\n\n"
+
+                        if _auto_obo:
+                            # Perform the exchange now and inject the token into ctx
+                            # so tool functions can use it for downstream API calls.
+                            try:
+                                _obo_tok = await get_obo_token(access_token, _obo_audience)
+                                ctx["obo_token"] = _obo_tok
+                                _auto_obo_ok = True
+                            except OBOError:
+                                _auto_obo_ok = False
+
                     # Emit a visible sub-step for the Auth0 CIBA bc-authorize request
                     ciba_call_id = None
                     ciba_sub_start = None
@@ -1737,8 +1803,32 @@ async def chat_stream(request: Request, response: Response):
                         }) + "\n\n"
 
                     start_t = time.monotonic()
-                    result = await dispatch_any_tool(name, args, ctx, refresh_token)
+                    result = await dispatch_any_tool(name, args, ctx, refresh_token, access_token)
                     elapsed_ms = int((time.monotonic() - start_t) * 1000)
+
+                    # Resolve the OBO sub-step
+                    if obo_call_id is not None:
+                        obo_elapsed = int((time.monotonic() - obo_start) * 1000) if obo_start else elapsed_ms
+                        if _auto_obo:
+                            obo_error = not _auto_obo_ok
+                            obo_summary = (
+                                "OBO token issued — agent acting on behalf of user"
+                                if _auto_obo_ok else "OBO exchange failed"
+                            )
+                        else:
+                            try:
+                                _obo_parsed = json.loads(result)
+                                obo_error = isinstance(_obo_parsed, dict) and "error" in _obo_parsed
+                            except Exception:
+                                obo_error = False
+                            obo_summary = _obo_parsed.get("error", "Exchange failed") if obo_error else "OBO token issued"
+                        yield "data: " + json.dumps({
+                            "t": "tool_result",
+                            "id": obo_call_id,
+                            "ok": not obo_error,
+                            "ms": obo_elapsed,
+                            "summary": obo_summary,
+                        }) + "\n\n"
 
                     # Resolve the Token Vault sub-step
                     if tv_call_id is not None:
