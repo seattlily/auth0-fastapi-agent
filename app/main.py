@@ -1482,7 +1482,7 @@ async def chat_page(request: Request, response: Response):
     return templates.TemplateResponse(
         request=request,
         name="chat.html",
-        context={"user": user, "ctx": ctx, "messages": messages, "visible_tools": visible_tools},
+        context={"user": user, "ctx": ctx, "messages": messages, "visible_tools": visible_tools, "auth_sid": request.session.get("last_auth_sid", "")},
     )
 
 
@@ -1769,7 +1769,7 @@ async def chat_stream(request: Request, response: Response):
                             "args": _obo_args,
                             "ciba": False,
                             "reasoning": False,
-                            "layer": "auth0",
+                            "layer": "token_vault",
                             "principal": {
                                 "agent_id": AUTH0_AGENT_ID,
                                 "user_sub": ctx.get("sub"),

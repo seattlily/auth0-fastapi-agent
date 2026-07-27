@@ -133,7 +133,7 @@ document.querySelectorAll('.message.assistant .content').forEach((el) => {
     let cibaStartTime = null;
     let restoring = false;
 
-    const AGENT_LOG_KEY = 'compass0_agent_log:{{ user.sub | default("") }}';
+    const AGENT_LOG_KEY = 'compass0_agent_log:{{ user.sub | default("") }}:{{ auth_sid | default("") }}';
     let logEvents = [];
 
     function saveLogEvents() {
@@ -441,10 +441,11 @@ document.querySelectorAll('.message.assistant .content').forEach((el) => {
     }
 
     const LAYER_META = {
-        agent:  { icon: '🤖', label: 'AI Agent',    cls: 'agent-log-layer-agent'  },
-        google: { icon: '🔗', label: 'Token Vault',  cls: 'agent-log-layer-google' },
-        auth0:  { icon: '🔐', label: 'Auth0 CIBA',   cls: 'agent-log-layer-auth0'  },
-        app:    { icon: '⚙️', label: 'App',          cls: 'agent-log-layer-app'    },
+        agent:       { icon: '🤖', label: 'AI Agent',    cls: 'agent-log-layer-agent'  },
+        google:      { icon: '🔗', label: 'Token Vault',  cls: 'agent-log-layer-google' },
+        token_vault: { icon: '🔐', label: 'Token Vault',  cls: 'agent-log-layer-auth0'  },
+        auth0:       { icon: '🔐', label: 'Auth0 CIBA',   cls: 'agent-log-layer-auth0'  },
+        app:         { icon: '⚙️', label: 'App',          cls: 'agent-log-layer-app'    },
     };
 
     function addUserTurnEntry(msg) {
