@@ -509,7 +509,7 @@ document.querySelectorAll('.message.assistant .content').forEach((el) => {
         const badge = document.createElement('span');
         badge.className = 'agent-log-layer-badge';
         let badgeText = '🤖 AI Agent';
-        if (msg.agent_id) badgeText += ' · ' + msg.agent_id;
+        if (msg.agent_id) badgeText += ' (' + msg.agent_id + ')';
         badge.textContent = badgeText;
         nameRow.appendChild(badge);
         entry.appendChild(nameRow);

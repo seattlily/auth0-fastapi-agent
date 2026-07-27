@@ -81,6 +81,15 @@ from tools.google_calendar import (
     create_calendar_event,
     list_upcoming_calendar_events,
 )
+from tools.auth0_my_account import (
+    CONNECTED_ACCOUNTS_SCOPES,
+    MyAccountError,
+    complete_connect as ma_complete_connect,
+    delete_account as ma_delete_account,
+    exchange_code_for_ma_token,
+    initiate_connect,
+    list_accounts as ma_list_accounts,
+)
 from tools.google_gmail import GMAIL_LIST_TOOL_SCHEMA, list_recent_emails
 
 MAX_TOOL_ITERATIONS = 12
@@ -1906,11 +1915,61 @@ async def mfa_enroll(request: Request, response: Response):
     )
 
 
-# ---------- connections (My Account API via auth0_server_python SDK) ----------
+# ---------- connections (My Account API — direct HTTP via auth0_my_account) ----------
 #
-# The SDK's ServerClient handles the My Account API token exchange internally
-# via get_access_token(audience=.../me/, scope=...). No separate re-auth flow
-# is needed — the SDK uses the stored refresh token from the main login session.
+# A dedicated OAuth code flow mints a My Account API access token:
+#   GET /connections/authorize   →  Auth0 /authorize?audience=.../me/
+#   GET /connections/ma-callback → exchange_code_for_ma_token → session["ma_access_token"]
+#
+# All Connected Accounts operations use the session-stored MA token directly.
+# This avoids the SDK's internal refresh-token exchange which is incompatible
+# with audience-locked sessions (AUTH0_AUDIENCE set to a custom API).
+
+
+def _ma_token(request: Request) -> str | None:
+    return request.session.get("ma_access_token")
+
+
+def _ma_authorize_url(redirect_uri: str, state: str) -> str:
+    from urllib.parse import urlencode
+    domain = os.environ["AUTH0_DOMAIN"]
+    params = {
+        "response_type": "code",
+        "client_id": os.environ["AUTH0_CLIENT_ID"],
+        "redirect_uri": redirect_uri,
+        "audience": f"https://{domain}/me/",
+        "scope": CONNECTED_ACCOUNTS_SCOPES,
+        "state": state,
+    }
+    return f"https://{domain}/authorize?" + urlencode(params)
+
+
+@app.get("/connections/authorize")
+async def connections_authorize(request: Request, response: Response):
+    user = await _get_user(request, response)
+    if not user:
+        return RedirectResponse(url="/auth/login")
+    state = secrets.token_urlsafe(16)
+    request.session["ma_state"] = state
+    redirect_uri = str(request.url_for("connections_ma_callback"))
+    return RedirectResponse(url=_ma_authorize_url(redirect_uri, state), status_code=303)
+
+
+@app.get("/connections/ma-callback", name="connections_ma_callback")
+async def connections_ma_callback(request: Request, response: Response):
+    from urllib.parse import quote_plus
+    code = request.query_params.get("code", "")
+    state = request.query_params.get("state", "")
+    expected_state = request.session.pop("ma_state", None)
+    if not code or state != expected_state:
+        return RedirectResponse(url="/connections?error=Invalid+state", status_code=303)
+    try:
+        redirect_uri = str(request.url_for("connections_ma_callback"))
+        token = await exchange_code_for_ma_token(code, redirect_uri)
+        request.session["ma_access_token"] = token
+    except Exception as e:
+        return RedirectResponse(url=f"/connections?error={quote_plus(str(e))}", status_code=303)
+    return RedirectResponse(url="/connections", status_code=303)
 
 
 @app.get("/connections")
@@ -1920,24 +1979,20 @@ async def connections_page(request: Request, response: Response):
     if not user:
         return RedirectResponse(url="/auth/login")
 
+    ma_token = _ma_token(request)
+    if not ma_token:
+        return RedirectResponse(url="/connections/authorize", status_code=303)
+
     accounts: list = []
     error: str | None = None
     try:
-        result = await auth_client.client.list_connected_accounts(
-            store_options=_store_options(request, response)
-        )
-        accounts = result.accounts
-    except AccessTokenError:
-        # Stale or invalid refresh token — clear the session and re-authenticate.
-        return RedirectResponse(url="/auth/logout", status_code=303)
-    except MyAccountApiError as e:
-        if e.status == 401:
-            # Auth0 rejected the token — likely an audience-locked session.
-            # Force a fresh login so the user gets an unlocked refresh token.
-            return RedirectResponse(url="/auth/logout", status_code=303)
-        error = str(e)
-    except Auth0Error as e:
-        error = str(e)
+        accounts = await ma_list_accounts(ma_token)
+    except MyAccountError as e:
+        err_str = str(e)
+        if "401" in err_str or "403" in err_str:
+            request.session.pop("ma_access_token", None)
+            return RedirectResponse(url="/connections/authorize", status_code=303)
+        error = err_str
 
     return templates.TemplateResponse(
         request=request,
@@ -1955,27 +2010,41 @@ async def connections_page(request: Request, response: Response):
 @app.post("/connections/connect/{connection}")
 async def connections_connect(request: Request, response: Response, connection: str):
     from urllib.parse import quote_plus
-    user, session, ctx = await require_login(request, response)
+    user = await _get_user(request, response)
     if not user:
         return RedirectResponse(url="/auth/login")
 
+    ma_token = _ma_token(request)
+    if not ma_token:
+        return RedirectResponse(url="/connections/authorize", status_code=303)
+
+    state = secrets.token_urlsafe(16)
+    redirect_uri = str(request.url_for("connections_callback"))
     scopes_for_connection: dict[str, list[str]] = {
         "google-oauth2": ["openid", *GOOGLE_CONNECTION_SCOPES],
     }
-    options = ConnectAccountOptions(
-        connection=connection,
-        redirect_uri=str(request.url_for("connections_callback")),
-        scopes=scopes_for_connection.get(connection),
-    )
     try:
-        connect_url = await auth_client.client.start_connect_account(
-            options=options,
-            store_options=_store_options(request, response),
+        result = await initiate_connect(
+            my_account_token=ma_token,
+            connection=connection,
+            redirect_uri=redirect_uri,
+            state=state,
+            scopes=scopes_for_connection.get(connection),
         )
-    except Auth0Error as e:
-        return RedirectResponse(
-            url=f"/connections?error={quote_plus(str(e))}", status_code=303
-        )
+    except MyAccountError as e:
+        err_str = str(e)
+        if "401" in err_str or "403" in err_str:
+            request.session.pop("ma_access_token", None)
+            return RedirectResponse(url="/connections/authorize", status_code=303)
+        return RedirectResponse(url=f"/connections?error={quote_plus(err_str)}", status_code=303)
+
+    request.session["pending_connect"] = {
+        "auth_session": result["auth_session"],
+        "state": state,
+        "redirect_uri": redirect_uri,
+    }
+    ticket = result.get("connect_params", {}).get("ticket", "")
+    connect_url = result["connect_uri"] + "?ticket=" + ticket
     return RedirectResponse(url=connect_url, status_code=303)
 
 
@@ -1991,45 +2060,52 @@ async def connections_complete(request: Request, response: Response):
     user = await _get_user(request, response)
     if not user:
         return JSONResponse({"error": "unauthorized"}, status_code=401)
+
+    ma_token = _ma_token(request)
+    if not ma_token:
+        return JSONResponse({"error": "no_ma_token"}, status_code=401)
+
     body = await request.json()
     connect_code = (body.get("connect_code") or "").strip()
     state = (body.get("state") or "").strip()
     if not connect_code or not state:
         return JSONResponse({"error": "missing connect_code or state"}, status_code=400)
 
-    from urllib.parse import urlencode
-    callback_url = (
-        str(request.url_for("connections_callback"))
-        + "?" + urlencode({"connect_code": connect_code, "state": state})
-    )
+    pending = request.session.get("pending_connect")
+    if not pending or pending.get("state") != state:
+        return JSONResponse({"error": "invalid_state"}, status_code=400)
+
     try:
-        await auth_client.client.complete_connect_account(
-            url=callback_url,
-            store_options=_store_options(request, response),
+        await ma_complete_connect(
+            my_account_token=ma_token,
+            auth_session=pending["auth_session"],
+            connect_code=connect_code,
+            redirect_uri=pending["redirect_uri"],
         )
-    except Auth0Error as e:
+    except MyAccountError as e:
         return JSONResponse({"error": str(e)}, status_code=400)
+
+    request.session.pop("pending_connect", None)
     request.session.pop("google_connected", None)
     return JSONResponse({"ok": True})
 
 
 @app.post("/connections/disconnect/{account_id}")
-async def connections_disconnect(
-    request: Request, response: Response, account_id: str
-):
+async def connections_disconnect(request: Request, response: Response, account_id: str):
     from urllib.parse import quote_plus
-    user, session, _ = await require_login(request, response)
+    user = await _get_user(request, response)
     if not user:
         return RedirectResponse(url="/auth/login")
+
+    ma_token = _ma_token(request)
+    if not ma_token:
+        return RedirectResponse(url="/connections/authorize", status_code=303)
+
     try:
-        await auth_client.client.delete_connected_account(
-            connected_account_id=account_id,
-            store_options=_store_options(request, response),
-        )
-    except Auth0Error as e:
-        return RedirectResponse(
-            url=f"/connections?error={quote_plus(str(e))}", status_code=303
-        )
+        await ma_delete_account(ma_token, account_id)
+    except MyAccountError as e:
+        return RedirectResponse(url=f"/connections?error={quote_plus(str(e))}", status_code=303)
+
     request.session.pop("google_connected", None)
     return RedirectResponse(url="/connections?success=disconnected", status_code=303)
 
