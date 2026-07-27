@@ -320,7 +320,7 @@ document.querySelectorAll('.message.assistant .content').forEach((el) => {
             `;
 
             card.addEventListener('click', () => {
-                const label = `Option ${i + 1} — ${f.airline} ${f.flight_no}, departing ${f.depart_time}`;
+                const label = `${f.airline} ${f.flight_no} (${(data.origin||'').toUpperCase()} → ${(data.destination||'').toUpperCase()}, ${data.date}, departs ${f.depart_time}, arrives ${f.arrive_time})`;
                 input.value = `I'll take ${label}`;
                 input.focus();
             });

@@ -1808,12 +1808,12 @@ TOOLS: dict[str, dict] = {
                 "name": "search_flights",
                 "description": (
                     "Search available flights for a date and origin/destination pair. "
-                    "Returns 3 mock flight options (airline, flight_no, depart/arrive "
-                    "times, duration, stops, price). Use this whenever the user asks "
-                    "to look for flights, find a flight, or compare flight options. "
-                    "After the user picks one: travel agents call book_trip; "
-                    "CUSTOMERS call request_trip instead — customers cannot book "
-                    "directly, their travel agent has to approve the request first."
+                    "Returns 3 mock flight options with airline, flight_no, depart_time, "
+                    "arrive_time, duration, stops, and price. For roundtrip bookings, "
+                    "call this twice in the same turn — once for the outbound leg and "
+                    "once for the return leg (swapped origin/destination, return_date). "
+                    "After the user picks flights: travel agents call book_trip; "
+                    "customers call request_trip."
                 ),
                 "parameters": {
                     "type": "object",
