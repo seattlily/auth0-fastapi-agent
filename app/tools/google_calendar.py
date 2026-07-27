@@ -202,14 +202,13 @@ CREATE_CALENDAR_EVENT_TOOL_SCHEMA = {
         "name": "create_calendar_event",
         "description": (
             "Create a new event on the user's primary Google Calendar. "
-            "Use whenever the user asks to schedule, add, book, or put "
-            "something on their calendar. If the user is adding a trip or "
-            "flight to their calendar, call get_trip_details first to get "
-            "the exact dates and details — do NOT ask the user when to "
-            "schedule it. Use the trip's depart_date as the start and "
-            "return_date as the end. For flights, use 'Flight: {origin} → "
-            "{destination}' as the summary. Only ask for the time if no "
-            "trip or booking context is available."
+            "IMPORTANT: Never call this without first showing the user the "
+            "proposed event details (title, start time with timezone, end "
+            "time, location) and receiving their explicit confirmation. "
+            "If the user is adding a trip, call get_trip_details first. "
+            "Always include the correct timezone offset in start/end times "
+            "(e.g. '2026-06-05T09:00:00-07:00'). Ask the user for the "
+            "time if the trip has no explicit departure/arrival time."
         ),
         "parameters": {
             "type": "object",
