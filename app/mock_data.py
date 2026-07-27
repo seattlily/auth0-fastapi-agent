@@ -239,8 +239,8 @@ def add_trip(
     origin: str,
     destination: str,
     depart_date: str,
-    return_date: str,
-    cost: float,
+    return_date: str = "",
+    cost: float = 0.0,
     currency: str = "USD",
 ) -> dict:
     if not get_customer(customer_id):
