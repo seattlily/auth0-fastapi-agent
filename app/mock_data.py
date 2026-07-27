@@ -217,7 +217,19 @@ def get_experiences(customer_id: Optional[str] = None) -> list[dict]:
 
 
 def _next_id(prefix: str, collection: list[dict]) -> str:
-    n = len(collection) + 1
+    # Use max existing + deleted number to avoid ID collisions when items
+    # have been removed from the collection.
+    existing = [
+        int(item["id"][len(prefix):])
+        for item in collection
+        if item["id"].startswith(prefix) and item["id"][len(prefix):].isdigit()
+    ]
+    deleted = [
+        int(did[len(prefix):])
+        for did in _DELETED_IDS
+        if did.startswith(prefix) and did[len(prefix):].isdigit()
+    ]
+    n = max(existing + deleted, default=0) + 1
     return f"{prefix}{n:03d}"
 
 

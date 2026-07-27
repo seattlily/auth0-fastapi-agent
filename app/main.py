@@ -681,6 +681,11 @@ async def require_login(request: Request, response: Response) -> tuple[dict, dic
                 f"resolved {cust['id']!r} via email. Set "
                 f"app_metadata.customer_id on this Auth0 user to remove this fallback."
             )
+    if ctx.get("role") == "self_service" and not ctx.get("customer_id"):
+        sub = ctx.get("sub") or ""
+        cust = get_customer_by_sub(sub)
+        if cust:
+            ctx["customer_id"] = cust["id"]
     if ctx.get("role") == "travel_agent" and not ctx.get("agent_id"):
         agent = get_agent_by_email(user_email)
         if agent:

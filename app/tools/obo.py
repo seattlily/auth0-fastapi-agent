@@ -43,10 +43,12 @@ async def get_obo_token(
             return token
 
     domain = os.environ["AUTH0_DOMAIN"]
+    client_id = os.environ.get("AUTH0_API_CLIENT_ID") or os.environ["AUTH0_CLIENT_ID"]
+    client_secret = os.environ.get("AUTH0_API_CLIENT_SECRET") or os.environ["AUTH0_CLIENT_SECRET"]
     body: dict = {
         "grant_type": OBO_GRANT_TYPE,
-        "client_id": os.environ["AUTH0_CLIENT_ID"],
-        "client_secret": os.environ["AUTH0_CLIENT_SECRET"],
+        "client_id": client_id,
+        "client_secret": client_secret,
         "subject_token": access_token,
         "subject_token_type": OBO_TOKEN_TYPE,
         "requested_token_type": OBO_TOKEN_TYPE,
