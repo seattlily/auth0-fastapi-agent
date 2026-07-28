@@ -1549,7 +1549,14 @@ async def dispatch_any_tool(name: str, args: dict, ctx: dict, refresh_token: str
                     "detail": detail,
                     "authorize_url": "/connections",
                 })
-            return json.dumps({"error": msg})
+            return json.dumps({
+                "error": "no_google_connection",
+                "detail": (
+                    "Could not get a Google access token. Your Google account may "
+                    "not be connected yet, or the connection may need to be refreshed."
+                ),
+                "authorize_url": "/connections",
+            })
         except Exception as e:
             msg = str(e)
             _scope_keywords = ("insufficient", "403", "forbidden", "scope", "permission denied")
