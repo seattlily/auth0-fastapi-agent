@@ -2106,19 +2106,17 @@ async def connections_page(request: Request, response: Response):
         return RedirectResponse(url="/auth/login")
 
     ma_token = _ma_token(request)
-    if not ma_token:
-        return RedirectResponse(url="/connections/authorize", status_code=303)
-
     accounts: list = []
     error: str | None = None
-    try:
-        accounts = await ma_list_accounts(ma_token)
-    except MyAccountError as e:
-        err_str = str(e)
-        if "401" in err_str or "403" in err_str:
-            request.session.pop("ma_access_token", None)
-            return RedirectResponse(url="/connections/authorize", status_code=303)
-        error = err_str
+    if ma_token:
+        try:
+            accounts = await ma_list_accounts(ma_token)
+        except MyAccountError as e:
+            err_str = str(e)
+            if "401" in err_str or "403" in err_str:
+                request.session.pop("ma_access_token", None)
+            else:
+                error = err_str
 
     return templates.TemplateResponse(
         request=request,
