@@ -2095,6 +2095,9 @@ async def connections_ma_callback(request: Request, response: Response):
         request.session["ma_access_token"] = token
     except Exception as e:
         return RedirectResponse(url=f"/connections?error={quote_plus(str(e))}", status_code=303)
+    pending = request.session.pop("pending_connection", None)
+    if pending:
+        return RedirectResponse(url=f"/connections/initiate/{pending}", status_code=303)
     return RedirectResponse(url="/connections", status_code=303)
 
 
@@ -2131,19 +2134,9 @@ async def connections_page(request: Request, response: Response):
     )
 
 
-@app.post("/connections/connect/{connection}")
-async def connections_connect(request: Request, response: Response, connection: str):
+async def _do_initiate_connect(request: Request, ma_token: str, connection: str):
     from urllib.parse import quote_plus
-    user = await _get_user(request, response)
-    if not user:
-        return RedirectResponse(url="/auth/login")
-
-    ma_token = _ma_token(request)
-    if not ma_token:
-        return RedirectResponse(url="/connections/authorize", status_code=303)
-
     scopes = ["openid", *GOOGLE_CONNECTION_SCOPES]
-
     state = secrets.token_urlsafe(16)
     redirect_uri = str(request.url_for("connections_callback"))
     try:
@@ -2158,6 +2151,7 @@ async def connections_connect(request: Request, response: Response, connection: 
         err_str = str(e)
         if "401" in err_str or "403" in err_str:
             request.session.pop("ma_access_token", None)
+            request.session["pending_connection"] = connection
             return RedirectResponse(url="/connections/authorize", status_code=303)
         return RedirectResponse(url=f"/connections?error={quote_plus(err_str)}", status_code=303)
 
@@ -2169,6 +2163,32 @@ async def connections_connect(request: Request, response: Response, connection: 
     ticket = result.get("connect_params", {}).get("ticket", "")
     connect_url = result["connect_uri"] + "?ticket=" + ticket
     return RedirectResponse(url=connect_url, status_code=303)
+
+
+@app.get("/connections/initiate/{connection}")
+async def connections_initiate(request: Request, response: Response, connection: str):
+    user = await _get_user(request, response)
+    if not user:
+        return RedirectResponse(url="/auth/login")
+    ma_token = _ma_token(request)
+    if not ma_token:
+        request.session["pending_connection"] = connection
+        return RedirectResponse(url="/connections/authorize", status_code=303)
+    return await _do_initiate_connect(request, ma_token, connection)
+
+
+@app.post("/connections/connect/{connection}")
+async def connections_connect(request: Request, response: Response, connection: str):
+    user = await _get_user(request, response)
+    if not user:
+        return RedirectResponse(url="/auth/login")
+
+    ma_token = _ma_token(request)
+    if not ma_token:
+        request.session["pending_connection"] = connection
+        return RedirectResponse(url="/connections/authorize", status_code=303)
+
+    return await _do_initiate_connect(request, ma_token, connection)
 
 
 @app.get("/connections/callback", name="connections_callback")
