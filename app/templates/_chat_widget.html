@@ -57,7 +57,6 @@
         <div class="prompt-chips" aria-label="Suggested prompts">
             <span class="prompt-chips-label">Try:</span>
             <button type="button" class="prompt-chip" data-prompt="Search for flights from ">Search for flights</button>
-            {% if 'read:my_trips' in perms %}<button type="button" class="prompt-chip" data-prompt="Book a flight to ">Book a flight</button>{% endif %}
             {% if 'read:my_trips' in perms %}<button type="button" class="prompt-chip" data-prompt="List my trips">List my trips</button>{% endif %}
             {% if 'read:my_trips' in perms %}<button type="button" class="prompt-chip" data-prompt="Add my next trip to Google Calendar">Add trip to Calendar</button>{% endif %}
             {% if 'read:my_trips' in perms %}<button type="button" class="prompt-chip" data-prompt="Show my upcoming bookings">Upcoming bookings</button>{% endif %}
@@ -66,7 +65,7 @@
         <div class="prompt-chips" aria-label="Suggested prompts">
             <span class="prompt-chips-label">Try:</span>
             <button type="button" class="prompt-chip" data-prompt="Search for flights ">Search for flights</button>
-            {% if 'book:own_trips' in perms %}<button type="button" class="prompt-chip" data-prompt="Book a flight to ">Book a flight</button>{% endif %}
+
             {% if 'book:own_experiences' in perms %}<button type="button" class="prompt-chip" data-prompt="Book an experience ">Book an experience</button>{% endif %}
             {% if 'read:my_trips' in perms %}<button type="button" class="prompt-chip" data-prompt="List my trips">List my trips</button>{% endif %}
         </div>
