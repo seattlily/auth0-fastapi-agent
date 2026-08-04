@@ -46,8 +46,7 @@
         {% elif ctx.role == 'travel_agent' %}
         <div class="prompt-chips" aria-label="Suggested prompts">
             <span class="prompt-chips-label">Try:</span>
-            {% if 'book:trips' in perms %}<button type="button" class="prompt-chip" data-prompt="Book a flight ">Book a flight</button>{% endif %}
-            {% if 'book:experiences' in perms %}<button type="button" class="prompt-chip" data-prompt="Book an experience ">Book an experience</button>{% endif %}
+{% if 'book:experiences' in perms %}<button type="button" class="prompt-chip" data-prompt="Book an experience ">Book an experience</button>{% endif %}
             {% if 'book:trips' in perms %}<button type="button" class="prompt-chip" data-prompt="Add a new customer named ">Add a customer</button>{% endif %}
             {% if 'book:trips' in perms %}<button type="button" class="prompt-chip" data-prompt="Cancel trip ">Cancel a trip</button>{% endif %}
             {% if 'book:experiences' in perms %}<button type="button" class="prompt-chip" data-prompt="Cancel experience ">Cancel an experience</button>{% endif %}
