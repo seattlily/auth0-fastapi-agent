@@ -723,6 +723,7 @@ async def require_login(request: Request, response: Response) -> tuple[dict, dic
         request.session["conversation_owner"] = sub
         request.session["last_auth_sid"] = auth_sid
         request.session["conversation"] = []
+        request.session["log_nonce"] = secrets.token_hex(8)
         request.session.pop("pending_connect", None)
         request.session.pop("google_connected", None)
 
@@ -1003,6 +1004,8 @@ async def dashboard(request: Request, response: Response):
         "needs_enrollment": needs_enrollment,
         "flash_success": request.query_params.get("success"),
         "flash_error": request.query_params.get("error"),
+        "auth_sid": request.session.get("last_auth_sid", ""),
+        "log_nonce": request.session.get("log_nonce", ""),
     }
 
     if role == "compass_admin":
@@ -1499,7 +1502,7 @@ async def chat_page(request: Request, response: Response):
     return templates.TemplateResponse(
         request=request,
         name="chat.html",
-        context={"user": user, "ctx": ctx, "messages": messages, "visible_tools": visible_tools, "auth_sid": request.session.get("last_auth_sid", "")},
+        context={"user": user, "ctx": ctx, "messages": messages, "visible_tools": visible_tools, "auth_sid": request.session.get("last_auth_sid", ""), "log_nonce": request.session.get("log_nonce", "")},
     )
 
 

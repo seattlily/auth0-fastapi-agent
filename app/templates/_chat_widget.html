@@ -131,7 +131,7 @@ document.querySelectorAll('.message.assistant .content').forEach((el) => {
     let cibaStartTime = null;
     let restoring = false;
 
-    const AGENT_LOG_KEY = 'compass0_agent_log:{{ user.sub | default("") }}:{{ auth_sid | default("") }}';
+    const AGENT_LOG_KEY = 'compass0_agent_log:{{ user.sub | default("") }}:{{ log_nonce | default("") }}';
     let logEvents = [];
 
     function saveLogEvents() {
