@@ -1613,6 +1613,7 @@ async def chat_stream(request: Request, response: Response):
     ctx["google_connected"] = request.session.get("google_connected", False)
 
     tool_schemas = [THINK_TOOL_SCHEMA] + cz_visible_schemas(ctx) + visible_google_schemas(ctx) + [OBO_TOOL_SCHEMA]
+    print(f"[DEBUG] access_token present: {bool(access_token)}, role: {ctx.get('role')}, perms: {ctx.get('permissions')}, cz_tools visible: {[s['function']['name'] for s in cz_visible_schemas(ctx)]}", flush=True)
 
     messages = (
         [{"role": "system", "content": build_system_prompt(user, ctx)}]
@@ -1810,11 +1811,14 @@ async def chat_stream(request: Request, response: Response):
                             # Perform the exchange now and inject the token into ctx
                             # so tool functions can use it for downstream API calls.
                             try:
+                                print(f"[DEBUG OBO] attempting exchange for tool={name} audience={_obo_audience}", flush=True)
                                 _obo_tok = await get_obo_token(access_token, _obo_audience)
                                 ctx["obo_token"] = _obo_tok
                                 _auto_obo_ok = True
-                            except OBOError:
+                                print(f"[DEBUG OBO] success", flush=True)
+                            except OBOError as e:
                                 _auto_obo_ok = False
+                                print(f"[DEBUG OBO] failed: {e}", flush=True)
 
                     # Emit a visible sub-step for the Auth0 CIBA bc-authorize request
                     ciba_call_id = None
