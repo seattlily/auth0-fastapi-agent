@@ -594,9 +594,10 @@ document.querySelectorAll('.message.assistant .content').forEach((el) => {
 
         const _FRIENDLY_NAMES = {
             token_vault_exchange: 'POST /oauth/token',
+            obo_token_exchange:   'POST /oauth/token',
             ciba_bc_authorize:    'POST /bc-authorize',
         };
-        const isTokenVaultStep = name === 'token_vault_exchange';
+        const isTokenVaultStep = name === 'token_vault_exchange' || name === 'obo_token_exchange';
         const isCibaSubstep    = name === 'ciba_bc_authorize';
         const displayName = reasoning ? 'Reasoning' : (_FRIENDLY_NAMES[name] || name);
         if (displayName) {
